@@ -42,6 +42,16 @@ struct Args {
     passive: bool,
     sequencer: Option<SequencerArgs>,
     agent: Option<AgentArgs>,
+    test: Option<TestArgs>,
+}
+
+/// `test(base = B, pre_run = P, run = R, post_run = Q)`: a test made from a
+/// base test and scenarios.
+struct TestArgs {
+    base: Type,
+    pre_run: Option<Type>,
+    run: Option<Type>,
+    post_run: Option<Type>,
 }
 
 struct SequencerArgs {
@@ -66,6 +76,7 @@ impl Parse for Args {
             passive: false,
             sequencer: None,
             agent: None,
+            test: None,
         };
         for meta in metas {
             match meta {
@@ -141,6 +152,35 @@ impl Parse for Args {
                         driver: need(driver, "driver")?,
                         reactive,
                         post_build,
+                    });
+                }
+                Meta::List(list) if list.path.is_ident("test") => {
+                    let (mut base, mut pre_run, mut run, mut post_run) = (None, None, None, None);
+                    list.parse_nested_meta(|nested| {
+                        let slot = if nested.path.is_ident("base") {
+                            &mut base
+                        } else if nested.path.is_ident("pre_run") {
+                            &mut pre_run
+                        } else if nested.path.is_ident("run") {
+                            &mut run
+                        } else if nested.path.is_ident("post_run") {
+                            &mut post_run
+                        } else {
+                            return Err(nested.error(
+                                "expected `base = ..`, `pre_run = ..`, `run = ..` or `post_run = ..`",
+                            ));
+                        };
+                        *slot = Some(nested.value()?.parse::<Type>()?);
+                        Ok(())
+                    })?;
+                    let base =
+                        base.ok_or_else(|| syn::Error::new(list.span(), "`base = ..` is needed"))?;
+                    args.kind = Some(Ident::new("test", list.path.span()));
+                    args.test = Some(TestArgs {
+                        base,
+                        pre_run,
+                        run,
+                        post_run,
                     });
                 }
                 other => return Err(syn::Error::new(other.span(), "unexpected argument")),
@@ -224,12 +264,32 @@ fn on_struct(args: Args, mut item: ItemStruct) -> syn::Result<TokenStream2> {
     if let Some(agent) = args.agent {
         return agent_struct(item, agent, declared, quote!(#has_context #ports));
     }
+    if let Some(test) = args.test {
+        return test_struct(item, test, declared);
+    }
+    // A test is the target of its own specs.
+    let spec_target = (kind == "test").then(|| {
+        quote! {
+            impl #core::__private::SpecTarget for #name {
+                type Target = Self;
+                fn __target(&mut self) -> &mut Self {
+                    self
+                }
+                fn __config(
+                    config: &mut <Self as #core::Component>::Context,
+                ) -> &mut <Self as #core::Component>::Context {
+                    config
+                }
+            }
+        }
+    });
     match args.sequencer {
         None => Ok(quote! {
             #item
             #declared
             #has_context
             #ports
+            #spec_target
         }),
         Some(sequencer) => sequencer_struct(item, sequencer, declared, quote!(#has_context #ports)),
     }
@@ -574,6 +634,159 @@ fn sequencer_struct(
     })
 }
 
+/// A test made from a base test and scenarios: the base in a field, and a
+/// `Component` and `Test` forwarding to it, except for the steps given a
+/// scenario. The struct's own fields start at their defaults.
+fn test_struct(
+    mut item: ItemStruct,
+    args: TestArgs,
+    declared: TokenStream2,
+) -> syn::Result<TokenStream2> {
+    let core = core();
+    let name = item.ident.clone();
+    let TestArgs {
+        base,
+        pre_run,
+        run,
+        post_run,
+    } = args;
+    let user: Vec<Ident> = match &mut item.fields {
+        Fields::Named(fields) => {
+            let user = fields
+                .named
+                .iter()
+                .map(|f| f.ident.clone().expect("named"))
+                .collect();
+            fields.named.push(syn::parse_quote! {
+                /// The base test, which the steps without a scenario run.
+                pub base: #base
+            });
+            user
+        }
+        _ => {
+            return Err(syn::Error::new(
+                item.span(),
+                "a test made from a base is a struct with named fields (`{}` when none)",
+            ));
+        }
+    };
+    let step = |scenario: Option<Type>, fallback: TokenStream2| match scenario {
+        Some(scenario) => quote! {
+            #core::Scenario::body(
+                &mut <#scenario as ::core::default::Default>::default(),
+                &mut self.base,
+                run_context,
+            )
+            .await
+        },
+        None => fallback,
+    };
+    let pre_run = step(
+        pre_run,
+        quote!(#core::Test::pre_run(&mut self.base, run_context).await),
+    );
+    let run = step(
+        run,
+        quote!(#core::Component::run(&mut self.base, run_context).await),
+    );
+    let post_run = step(
+        post_run,
+        quote!(#core::Test::post_run(&mut self.base, run_context).await),
+    );
+    Ok(quote! {
+        #item
+        #declared
+
+        impl #core::Component for #name {
+            type Context = <#base as #core::Component>::Context;
+            const KIND: #core::Kind = #core::Kind::Test;
+
+            fn build(
+                scope: &#core::Scope,
+                context: Self::Context,
+            ) -> ::core::result::Result<Self, #core::__private::TestError> {
+                ::core::result::Result::Ok(#name {
+                    #(#user: ::core::default::Default::default(),)*
+                    base: <#base as #core::Component>::build(scope, context)?,
+                })
+            }
+
+            async fn run(
+                &mut self,
+                run_context: &mut #core::RunContext,
+            ) -> ::core::result::Result<(), #core::__private::TestError> {
+                #run
+            }
+
+            fn check(&mut self, check_context: &mut #core::CheckContext) {
+                #core::Component::check(&mut self.base, check_context)
+            }
+
+            fn report(&self, report_context: &#core::ReportContext) {
+                #core::Component::report(&self.base, report_context)
+            }
+
+            fn __default_task(
+                &mut self,
+            ) -> ::core::option::Option<#core::__private::TaskFuture> {
+                #core::Component::__default_task(&mut self.base)
+            }
+
+            fn __unbound(&self) -> ::std::vec::Vec<&'static str> {
+                #core::Component::__unbound(&self.base)
+            }
+        }
+
+        impl #core::Test for #name {
+            fn setup(
+                setup_context: &mut #core::SetupContext,
+            ) -> ::core::result::Result<Self::Context, #core::__private::TestError> {
+                <#base as #core::Test>::setup(setup_context)
+            }
+
+            async fn pre_run(
+                &mut self,
+                run_context: &mut #core::RunContext,
+            ) -> ::core::result::Result<(), #core::__private::TestError> {
+                #pre_run
+            }
+
+            async fn post_run(
+                &mut self,
+                run_context: &mut #core::RunContext,
+            ) -> ::core::result::Result<(), #core::__private::TestError> {
+                #post_run
+            }
+        }
+
+        /// Its specs are written for the base.
+        impl #core::__private::SpecTarget for #name {
+            type Target = <#base as #core::__private::SpecTarget>::Target;
+            fn __target(&mut self) -> &mut Self::Target {
+                #core::__private::SpecTarget::__target(&mut self.base)
+            }
+            fn __config(
+                config: &mut <Self as #core::Component>::Context,
+            ) -> &mut <Self::Target as #core::Component>::Context {
+                <#base as #core::__private::SpecTarget>::__config(config)
+            }
+        }
+
+        impl ::core::ops::Deref for #name {
+            type Target = #base;
+            fn deref(&self) -> &#base {
+                &self.base
+            }
+        }
+
+        impl ::core::ops::DerefMut for #name {
+            fn deref_mut(&mut self) -> &mut #base {
+                &mut self.base
+            }
+        }
+    })
+}
+
 fn has_fn(item: &ItemImpl, name: &str) -> bool {
     item.items
         .iter()
@@ -581,6 +794,13 @@ fn has_fn(item: &ItemImpl, name: &str) -> bool {
 }
 
 fn on_impl(args: Args, mut item: ItemImpl) -> syn::Result<TokenStream2> {
+    if args.test.is_some() {
+        return Err(syn::Error::new(
+            Span::call_site(),
+            "a test made from a base is generated whole: \
+             `#[component(test(base = ..))]` goes on its struct only",
+        ));
+    }
     if args.sequencer.is_some() {
         return Err(syn::Error::new(
             Span::call_site(),

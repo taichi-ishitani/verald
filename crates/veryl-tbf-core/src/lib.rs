@@ -26,7 +26,7 @@ pub use sequence::{HasBase, Sequence, SequenceCore};
 pub use sequencer::{
     ArbRequest, Arbiter, FifoArbiter, Rng, SeqItemPort, Sequencer, SequencerHandle,
 };
-pub use test::{BundledSpecs, FromSetting, Methodology, SetupContext, Spec, Test};
+pub use test::{BundledSpecs, FromSetting, Methodology, Scenario, SetupContext, Spec, Test};
 pub use tlm::{AnalysisExport, AnalysisFifo, AnalysisPort, ItemWaiter, Subscriber};
 pub use veryl_tbf_macros::{component, register_test, sequence};
 
@@ -45,9 +45,9 @@ pub mod prelude {
         AgentConfig, AnalysisExport, AnalysisFifo, AnalysisPort, BundledSpecs, CheckContext,
         Component, DriverPort, HasBase, HasContext, Instance, InstanceContext, ItemHandle,
         ItemWaiter, Kind, Knob, MonitorPort, OptInstance, ReactiveSequence, ReactiveSequencer,
-        ReportContext, RequestPort, RunContext, Scope, SeqItemPort, Sequence, SequenceCore,
-        Sequencer, SequencerHandle, SetupContext, Spec, Subscriber, Test, bundled_specs, component,
-        register_test, sequence,
+        ReportContext, RequestPort, RunContext, Scenario, Scope, SeqItemPort, Sequence,
+        SequenceCore, Sequencer, SequencerHandle, SetupContext, Spec, Subscriber, Test,
+        bundled_specs, component, register_test, sequence,
     };
 }
 
@@ -58,7 +58,7 @@ pub mod __private {
     pub use crate::context::{ContextParts, DeclaredKind};
     pub use crate::sequence::SequenceFields;
     pub use crate::sequencer::SequencerCore;
-    pub use crate::test::{TestEntry, start_test};
+    pub use crate::test::{SpecTarget, TestEntry, start_test};
     pub use inventory;
     pub use veryl_tbf_runtime::TestError;
 }

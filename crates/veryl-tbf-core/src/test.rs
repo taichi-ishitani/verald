@@ -13,11 +13,52 @@ use crate::report;
 
 /// A test: the root of the hierarchy. It is made in two steps, its
 /// configuration (`setup`) and then its hierarchy (`Component::build`, from
-/// that configuration), with a spec applied after each; its `run` is the
-/// scenario, and the run phase ends when it returns.
+/// that configuration), with a spec applied after each. It runs in three:
+/// `pre_run`, `run` (the scenario) and `post_run`; the run phase ends when
+/// `post_run` returns.
 pub trait Test: Component {
     /// Makes the configuration the test is built from (may randomize it).
     fn setup(setup_context: &mut SetupContext) -> Result<Self::Context, TestError>;
+
+    /// Before `run`: the preparation every scenario shares (waiting for the
+    /// reset, setting the DUT up).
+    async fn pre_run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
+        Ok(())
+    }
+
+    /// After `run`: the wind-up every scenario shares (waiting for the bus
+    /// to go idle, reading the status).
+    async fn post_run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
+        Ok(())
+    }
+}
+
+/// What a test made from a base test runs for a step, on the base:
+/// `#[component(test(base = B, run = S))]`. It plays a virtual sequence,
+/// with the test as its virtual sequencer.
+pub trait Scenario: Default + 'static {
+    /// The test it runs on.
+    type Test: Test;
+
+    async fn body(
+        &mut self,
+        test: &mut Self::Test,
+        run_context: &mut RunContext,
+    ) -> Result<(), TestError>;
+}
+
+/// The test a spec is written for: the test itself, or the root base of a
+/// test made from a base; implemented by `#[component(test..)]` on the
+/// struct, which a registered test needs.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` needs `#[component(test)]` on its struct to be registered",
+    label = "a test with no `#[component(test)]` on its struct"
+)]
+pub trait SpecTarget: Test {
+    type Target: Test;
+    fn __target(&mut self) -> &mut Self::Target;
+    fn __config(config: &mut Self::Context) -> &mut <Self::Target as Component>::Context;
 }
 
 /// A variation of a test: settings and callbacks before it is built, typed
@@ -152,17 +193,18 @@ inventory::collect!(TestEntry);
 /// Builds the test `T` with `spec` and starts its run phase: what a
 /// registered test does when the test module starts it.
 #[doc(hidden)]
-pub fn start_test<T: Test, S: Spec<T>>(
+pub fn start_test<T: SpecTarget, S: Spec<T::Target>>(
     start: &mut Start,
     name: &'static str,
     spec: S,
 ) -> Result<(), TestError> {
     set_phase(Phase::Build);
     let mut config = T::setup(&mut SetupContext { start })?;
-    spec.pre_build(&mut config);
+    spec.pre_build(T::__config(&mut config));
     let top = Scope::new(Rc::from(""));
     let mut test: Instance<T> = top.make::<T>(Rc::from(""), config)?;
-    spec.post_build(&mut test);
+    spec.post_build(test.__target());
+    let typed = test.rc().clone();
     drop(test);
     let root = top
         .into_children()
@@ -199,22 +241,29 @@ pub fn start_test<T: Test, S: Spec<T>>(
         )));
     }
 
-    // Every component's run, parents before children; the test's is the
-    // main task. Each first borrows its component and yields, so that all
-    // are borrowed before any user code runs.
+    // Every component's run, parents before children; the test's three
+    // steps are the main task. Each first borrows its component and yields,
+    // so that all are borrowed before any user code runs.
     set_phase(Phase::Run);
+    // The borrow is held across the whole run on purpose, as below.
+    #[allow(clippy::await_holding_refcell_ref)]
+    let main = async move {
+        let mut test = typed.borrow_mut();
+        yield_now().await;
+        let mut run_context = RunContext::new(Rc::from(name));
+        Test::pre_run(&mut *test, &mut run_context).await?;
+        Component::run(&mut *test, &mut run_context).await?;
+        Test::post_run(&mut *test, &mut run_context).await
+    };
+    start.main(name, main);
     let mut nodes = Vec::new();
     root.pre_order(&mut nodes);
     for node in nodes {
-        if node.passive {
+        if node.passive || node.path.is_empty() {
             continue;
         }
         let component = node.component.clone();
-        let path: Rc<str> = if node.path.is_empty() {
-            Rc::from(name)
-        } else {
-            node.path.clone()
-        };
+        let path = node.path.clone();
         let owner = path.clone();
         // The borrow is held across the whole run on purpose: it is what
         // keeps the component from being reached during the run phase.
@@ -225,11 +274,7 @@ pub fn start_test<T: Test, S: Spec<T>>(
             let mut run_context = RunContext::new(path);
             component.run(&mut run_context).await
         };
-        if node.path.is_empty() {
-            start.main(&owner, task);
-        } else {
-            start.spawn(&owner, task);
-        }
+        start.spawn(&owner, task);
     }
 
     // Default sequences, started with the run phase.

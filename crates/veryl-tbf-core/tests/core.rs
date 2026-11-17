@@ -124,6 +124,7 @@ struct BasicConfig {
 }
 
 /// Runs for a number of cycles, then sends the board what it saw.
+#[component(test)]
 struct BasicTest {
     env: Instance<Env>,
     clk: Clock,

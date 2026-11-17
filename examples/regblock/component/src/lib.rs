@@ -407,17 +407,8 @@ impl Component for RegTest {
         })
     }
 
-    async fn run(&mut self, run_context: &mut RunContext) -> Result<(), TestError> {
-        self.rst.asserted().await;
-        self.rst.released().await;
-        WriteReadAll::new(self.rounds)
-            .start(&self.sequencer)
-            .await?;
-        run_context.info(format!(
-            "done; the scoreboard has seen {} reads",
-            self.env.borrow().scoreboard.borrow().reads
-        ));
-        Ok(())
+    async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
+        WriteReadAll::new(self.rounds).start(&self.sequencer).await
     }
 }
 
@@ -427,8 +418,70 @@ impl Test for RegTest {
             rounds: setup_context.get("rounds")?,
         })
     }
+
+    /// Every scenario starts after the reset.
+    async fn pre_run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
+        self.rst.asserted().await;
+        self.rst.released().await;
+        Ok(())
+    }
+
+    /// Every scenario ends by telling what the scoreboard saw.
+    async fn post_run(&mut self, run_context: &mut RunContext) -> Result<(), TestError> {
+        run_context.info(format!(
+            "done; the scoreboard has seen {} reads",
+            self.env.borrow().scoreboard.borrow().reads
+        ));
+        Ok(())
+    }
 }
 
 register_test!(RegTest);
+
+// ---------------------------------------------------------------------------
+// A test made from RegTest and a scenario: RegTest's preparation and
+// wind-up, another body
+// ---------------------------------------------------------------------------
+
+/// Writes every register, then reads them back from the last to the first,
+/// interleaving a rewrite of each register after its read.
+#[sequence(sequencer = BusSequencer, base = BusSeqBase)]
+pub struct ReverseReadBack {}
+
+impl Sequence for ReverseReadBack {
+    async fn body(&mut self) -> Result<(), TestError> {
+        for addr in 0..8u8 {
+            self.write(addr, 0xa000 | u16::from(addr)).await?;
+        }
+        for addr in (0..8u8).rev() {
+            self.read(addr).await?;
+            self.write(addr, 0x5000 | u16::from(addr)).await?;
+            self.read(addr).await?;
+        }
+        Ok(())
+    }
+}
+
+/// Runs `ReverseReadBack` on RegTest's sequencer.
+#[derive(Default)]
+pub struct ReverseScenario {}
+
+impl Scenario for ReverseScenario {
+    type Test = RegTest;
+
+    async fn body(
+        &mut self,
+        test: &mut RegTest,
+        run_context: &mut RunContext,
+    ) -> Result<(), TestError> {
+        run_context.info("reading back in reverse");
+        ReverseReadBack::new().start(&test.sequencer).await
+    }
+}
+
+#[component(test(base = RegTest, run = ReverseScenario))]
+pub struct ReverseTest {}
+
+register_test!(ReverseTest);
 
 veryl_tbf::export!("tbf_regblock");

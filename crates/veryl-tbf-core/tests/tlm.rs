@@ -131,6 +131,7 @@ impl Component for Collector {
     }
 }
 
+#[component(test)]
 struct TlmTest {
     monitor: Instance<Monitor>,
     waiter: ItemWaiter<ItemHandle<Tx>, u32>,
@@ -189,6 +190,7 @@ impl Test for TlmTest {
 }
 
 /// Connects a port to a component with a run.
+#[component(test)]
 struct WrongTest;
 
 impl Component for WrongTest {

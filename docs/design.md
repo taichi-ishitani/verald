@@ -469,6 +469,83 @@ module passed with `set` (`setup_context.get`, see [Runner](#runner)), random nu
 
 The hierarchy is built in one place, so it is the same for every test.
 
+### The run of a test, and scenarios
+
+Decided: a test's run is three steps, the common preparation, the scenario
+and the common wind-up, each of which may take time:
+
+```rust
+pub trait Test: Component {
+    fn setup(setup_context: &mut SetupContext) -> Result<Self::Context, TestError>;
+    /// Before `run`: wait for the reset, set the DUT up.
+    async fn pre_run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> { Ok(()) }
+    /// After `run`: wait for the bus to go idle, read the status.
+    async fn post_run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> { Ok(()) }
+}
+```
+
+The framework calls `pre_run`, `run` (`Component::run`) and `post_run` in
+turn in the test's task, and the run phase ends when `post_run` returns; an
+`Err` stops there (as a fatal error stops UVM's later phases). They are on
+`Test`, not `Component`: only the test's run is split. Checks that take no
+time stay in `check`. (`setup` was taken by `Test::setup`; the names follow
+`Spec`'s `pre_build` / `post_build`.)
+
+A simple test writes its `run` (and `pre_run` / `post_run` as it needs).
+Tests that share their hierarchy and their preparation and differ in what
+they do are made from a base test and scenarios: a scenario is a type that
+implements `Scenario`, run on the base test, which plays the role of UVM's
+virtual sequencer (a virtual sequence reaching every sequencer through
+`p_sequencer`) with nothing to copy:
+
+```rust
+pub trait Scenario: Default + 'static {
+    /// The test it runs on.
+    type Test: Test;
+    async fn body(&mut self, test: &mut Self::Test, run_context: &mut RunContext)
+        -> Result<(), TestError>;
+}
+
+#[derive(Default)]
+pub struct WriteReadAll {}
+
+impl Scenario for WriteReadAll {
+    type Test = RegTest;
+    async fn body(&mut self, test: &mut RegTest, _run_context: &mut RunContext)
+        -> Result<(), TestError> {
+        WriteReadAllSeq::new(test.rounds).start(&test.sequencer).await
+    }
+}
+
+// a test made of the base and a scenario for some of its steps
+#[component(test(base = RegTest, run = WriteReadAll))]
+pub struct WriteReadAllTest {}
+
+register_test!(WriteReadAllTest);
+```
+
+`#[component(test(base = B, pre_run = P, run = R, post_run = Q))]` (each
+step optional) generates the test: a field `base` holding the base test
+(and `Deref` / `DerefMut` to it), and a `Component` and `Test` that forward
+`setup`, `build`, `check` and `report` to the base, and for each step call
+the scenario given for it (made with `Default`, given `&mut` the base) or
+else the base's own. The base keeps its place in the hierarchy (its
+children are the test's), and a generated test may itself be a base. The
+struct's own fields start at their defaults.
+
+- A spec is written for the base test (`Spec<RegTest>`) and serves every
+  test made from it: a generated test applies its spec to the base, and
+  takes the base's configuration. What a test's specs are written for is
+  told by a hidden trait that `#[component(test)]` on the struct
+  implements, so a registered test needs the attribute on its struct (a
+  test without it is refused at `register_test!`, by name): Rust has no way
+  to give every test a default and let a generated test override it.
+- A scenario is made with `Default` and reads its values from the test in
+  `body`; given for several steps, it is made once for each.
+- The trait is `Scenario`, its method `body`, as a sequence's: a scenario
+  is not a `Sequence` (no sequencer arbitrates it), and `run` would repeat
+  the step's name.
+
 ## Sequences
 
 Decided: three layers, as UVM's `uvm_sequence_base`, a protocol's sequence
