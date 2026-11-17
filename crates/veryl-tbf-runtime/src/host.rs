@@ -316,6 +316,26 @@ fn check_timeout() {
     }
 }
 
+thread_local! {
+    /// The seed Veryl gives the testbench instance (`BuildCtx::seed`); kept
+    /// apart from the state, which `on_init` resets after it is taken.
+    static SEED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Takes the seed Veryl derives for the instance from the run's seed
+/// (`veryl test --seed`), the test and the instance.
+#[doc(hidden)]
+pub fn on_build(ctx: &mut veryl_component::BuildCtx) -> HookResult {
+    SEED.with(|s| s.set(ctx.seed()));
+    Ok(())
+}
+
+/// The test's seed: the one Veryl gives the testbench instance, from which
+/// every seed of the testbench is derived.
+pub fn seed() -> u64 {
+    SEED.with(std::cell::Cell::get)
+}
+
 /// `on_init`: a fresh runtime for this simulation.
 pub fn on_init<T: Testbench>(_ctx: &mut SimCtx) -> HookResult {
     state::init();

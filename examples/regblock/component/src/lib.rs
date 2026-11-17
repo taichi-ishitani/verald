@@ -15,18 +15,43 @@ use veryl_tbf::runtime::run_with_reset;
 // ---------------------------------------------------------------------------
 
 /// A transfer: a write of `data`, or a read whose `data` the driver (or the
-/// monitor) fills in.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// monitor) fills in. Random under the agent's configuration, which bounds
+/// the address.
+#[randomize(context = BusConfig)]
+#[derive(Clone, Debug, Default)]
 pub struct BusItem {
+    #[rand]
     pub write: bool,
+    #[rand]
     pub addr: u8,
+    #[rand]
     pub data: u16,
+}
+
+#[constraints]
+impl BusItem {
+    fn in_range() {
+        addr < context.regs;
+    }
+}
+
+impl BusItem {
+    pub fn new(write: bool, addr: u8, data: u16) -> Self {
+        BusItem {
+            write,
+            addr,
+            data,
+            ..Default::default()
+        }
+    }
 }
 
 /// The agent's configuration: its mode, and the interfaces it uses, as the
 /// test module registered them.
 pub struct BusConfig {
     pub active: bool,
+    /// The number of registers behind the bus.
+    pub regs: u8,
     pub driver_if: &'static str,
     pub monitor_if: &'static str,
 }
@@ -201,21 +226,13 @@ impl Component for BusMonitor {
                 let addr = pending
                     .pop_front()
                     .ok_or("read data with no read pending")?;
-                let item = ItemHandle::new(BusItem {
-                    write: false,
-                    addr,
-                    data: bus.rdata,
-                });
+                let item = ItemHandle::new(BusItem::new(false, addr, bus.rdata));
                 run_context.trace(format!("read {addr} = {:#06x}", bus.rdata));
                 self.port.write(&item);
             }
             if bus.valid && bus.ready {
                 if bus.write {
-                    let item = ItemHandle::new(BusItem {
-                        write: true,
-                        addr: bus.addr,
-                        data: bus.wdata,
-                    });
+                    let item = ItemHandle::new(BusItem::new(true, bus.addr, bus.wdata));
                     run_context.trace(format!("write {} = {:#06x}", bus.addr, bus.wdata));
                     self.port.write(&item);
                 } else {
@@ -242,22 +259,14 @@ pub struct BusSeqBase {}
 
 pub trait BusSequence: SequenceCore<Sequencer = BusSequencer> + HasBase<BusSeqBase> {
     async fn write(&mut self, addr: u8, data: u16) -> Result<(), TestError> {
-        let mut item = BusItem {
-            write: true,
-            addr,
-            data,
-        };
+        let mut item = BusItem::new(true, addr, data);
         self.start_item(&mut item).await?;
         self.finish_item(item).await?;
         Ok(())
     }
 
     async fn read(&mut self, addr: u8) -> Result<u16, TestError> {
-        let mut item = BusItem {
-            write: false,
-            addr,
-            data: 0,
-        };
+        let mut item = BusItem::new(false, addr, 0);
         self.start_item(&mut item).await?;
         let item = self.finish_item(item).await?;
         let data = item.borrow().data;
@@ -393,6 +402,7 @@ impl Component for RegTest {
     fn build(scope: &Scope, config: RegTestConfig) -> Result<Self, TestError> {
         let context = InstanceContext::new(BusConfig {
             active: true,
+            regs: 8,
             driver_if: "bus",
             monitor_if: "bus_mon",
         });
@@ -483,5 +493,51 @@ impl Scenario for ReverseScenario {
 pub struct ReverseTest {}
 
 register_test!(ReverseTest);
+
+// ---------------------------------------------------------------------------
+// A test made from RegTest and a random scenario
+// ---------------------------------------------------------------------------
+
+/// Random writes and reads, `count` of them, each randomized under the
+/// agent's configuration (so within its registers).
+#[sequence(sequencer = BusSequencer, base = BusSeqBase)]
+pub struct RandomAccess {
+    count: u16,
+}
+
+impl Sequence for RandomAccess {
+    async fn body(&mut self) -> Result<(), TestError> {
+        for _ in 0..self.count {
+            let mut item = BusItem::default();
+            self.start_item(&mut item).await?;
+            self.randomize_item(&mut item)?;
+            self.finish_item(item).await?;
+        }
+        Ok(())
+    }
+}
+
+/// Runs `RandomAccess` on RegTest's sequencer, 24 transfers a round.
+#[derive(Default)]
+pub struct RandomScenario {}
+
+impl Scenario for RandomScenario {
+    type Test = RegTest;
+
+    async fn body(
+        &mut self,
+        test: &mut RegTest,
+        run_context: &mut RunContext,
+    ) -> Result<(), TestError> {
+        let count = 24 * test.rounds;
+        run_context.info(format!("{count} random transfers"));
+        RandomAccess::new(count).start(&test.sequencer).await
+    }
+}
+
+#[component(test(base = RegTest, run = RandomScenario))]
+pub struct RandomTest {}
+
+register_test!(RandomTest);
 
 veryl_tbf::export!("tbf_regblock");

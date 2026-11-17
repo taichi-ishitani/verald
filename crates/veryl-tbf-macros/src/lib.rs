@@ -1,11 +1,14 @@
 //! Procedural macros of veryl-tbf: modports, clocking blocks and their wait
-//! macros (see `veryl_tbf_runtime::clocking`).
+//! macros (see `veryl_tbf_runtime::clocking`), components, sequences and
+//! tests (see `veryl_tbf_core`), and constrained random (see
+//! `veryl_tbf_random`).
 //!
 //! The generated code names the runtime through the crate the user depends
 //! on: `veryl-tbf` (as `veryl_tbf::runtime`) or `veryl-tbf-runtime`.
 
 mod clocking;
 mod component;
+mod random;
 mod test;
 
 use proc_macro::TokenStream;
@@ -48,6 +51,25 @@ pub(crate) fn core() -> TokenStream2 {
             quote!(::#name)
         }
         _ => quote!(::veryl_tbf_core),
+    }
+}
+
+/// The path of the constrained random crate as the calling crate reaches
+/// it: `veryl_tbf::random`, or `veryl_tbf_random` used on its own.
+pub(crate) fn random() -> TokenStream2 {
+    if let Ok(found) = crate_name("veryl-tbf") {
+        let name = match found {
+            FoundCrate::Itself => Ident::new("veryl_tbf", Span::call_site()),
+            FoundCrate::Name(name) => Ident::new(&name, Span::call_site()),
+        };
+        return quote!(::#name::random);
+    }
+    match crate_name("veryl-tbf-random") {
+        Ok(FoundCrate::Name(name)) => {
+            let name = Ident::new(&name, Span::call_site());
+            quote!(::#name)
+        }
+        _ => quote!(::veryl_tbf_random),
     }
 }
 
@@ -188,4 +210,48 @@ pub fn tick_until_within(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn tick_while_within(input: TokenStream) -> TokenStream {
     expand(clocking::wait("tick_while", input.into(), true))
+}
+
+/// Makes a struct randomizable: `#[rand]` fields are random variables,
+/// the others are state. See `veryl_tbf_random`.
+#[proc_macro_attribute]
+pub fn randomize(attr: TokenStream, item: TokenStream) -> TokenStream {
+    expand(random::randomize(attr.into(), item.into()))
+}
+
+/// The constraint blocks of a random struct (`#[constraints] impl T`), or
+/// of a constraint set (`#[constraints(for T)]`).
+#[proc_macro_attribute]
+pub fn constraints(attr: TokenStream, item: TokenStream) -> TokenStream {
+    expand(random::constraints(attr.into(), item.into()))
+}
+
+/// A function written in constraint syntax, expanded where it is called.
+#[proc_macro_attribute]
+pub fn constraint_fn(attr: TokenStream, item: TokenStream) -> TokenStream {
+    expand(random::constraint_fn(attr.into(), item.into()))
+}
+
+/// Lets a fieldless enum be a random variable: it takes only its variants.
+#[proc_macro_derive(RandEnum)]
+pub fn rand_enum(item: TokenStream) -> TokenStream {
+    expand(random::rand_enum(item.into()))
+}
+
+/// `randomize_with!(obj, { constraints })`: SV `randomize() with`.
+#[proc_macro]
+pub fn randomize_with(input: TokenStream) -> TokenStream {
+    expand(random::randomize_with(input.into()))
+}
+
+/// `std_randomize!([x, y], { constraints })`: randomizes local variables.
+#[proc_macro]
+pub fn std_randomize(input: TokenStream) -> TokenStream {
+    expand(random::std_randomize(input.into()))
+}
+
+/// `randcase! { 3 => a(), 1 => b() }`: runs one branch, picked by weight.
+#[proc_macro]
+pub fn randcase(input: TokenStream) -> TokenStream {
+    expand(random::randcase(input.into()))
 }

@@ -154,14 +154,14 @@ pub(crate) fn message(severity: Severity, path: &str, text: fmt::Arguments<'_>) 
 
 /// Logs the report summary, as UVM's: the counts, and a fatal error if one
 /// ended the run.
-pub(crate) fn summary(test: &str, fatal: Option<(&str, &TestError)>) {
+pub(crate) fn summary(test: &str, seed: u64, fatal: Option<(&str, &TestError)>) {
     let counts = REPORT.with(|r| r.borrow().counts);
     let counted: Vec<String> = Severity::ALL
         .into_iter()
         .map(|s| format!("{} {}", counts[s as usize], s.name()))
         .collect();
     sim::log(&format!(
-        "--- report summary: test {test}, ended at {} ---",
+        "--- report summary: test {test}, seed {seed}, ended at {} ---",
         sim::time()
     ));
     sim::log(&counted.join(", "));

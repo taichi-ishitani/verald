@@ -10,6 +10,8 @@ use crate::component::{
     CheckContext, Component, Instance, Node, Phase, ReportContext, RunContext, Scope, set_phase,
 };
 use crate::report;
+use crate::seeds;
+use veryl_tbf_random::seeded;
 
 /// A test: the root of the hierarchy. It is made in two steps, its
 /// configuration (`setup`) and then its hierarchy (`Component::build`, from
@@ -199,10 +201,16 @@ pub fn start_test<T: SpecTarget, S: Spec<T::Target>>(
     spec: S,
 ) -> Result<(), TestError> {
     set_phase(Phase::Build);
-    let mut config = T::setup(&mut SetupContext { start })?;
+    // The test's source: entered while it sets up, builds and runs.
+    seeds::begin(veryl_tbf_runtime::host::seed());
+    let source = seeds::component(std::any::type_name::<T>(), name);
+    let entered = source.enter();
+    let config = T::setup(&mut SetupContext { start });
+    drop(entered);
+    let mut config = config?;
     spec.pre_build(T::__config(&mut config));
     let top = Scope::new(Rc::from(""));
-    let mut test: Instance<T> = top.make::<T>(Rc::from(""), config)?;
+    let mut test: Instance<T> = top.make_with::<T>(Rc::from(""), config, source.clone())?;
     spec.post_build(test.__target());
     let typed = test.rc().clone();
     drop(test);
@@ -255,7 +263,7 @@ pub fn start_test<T: SpecTarget, S: Spec<T::Target>>(
         Component::run(&mut *test, &mut run_context).await?;
         Test::post_run(&mut *test, &mut run_context).await
     };
-    start.main(name, main);
+    start.main(name, seeded(source, main));
     let mut nodes = Vec::new();
     root.pre_order(&mut nodes);
     for node in nodes {
@@ -274,7 +282,7 @@ pub fn start_test<T: SpecTarget, S: Spec<T::Target>>(
             let mut run_context = RunContext::new(path);
             component.run(&mut run_context).await
         };
-        start.spawn(&owner, task);
+        start.spawn(&owner, seeded(node.source.clone(), task));
     }
 
     // Default sequences, started with the run phase.
@@ -307,12 +315,12 @@ fn finish(name: &str, root: &Node, end: &RunEnd) -> Result<(), TestError> {
                 let report_context = ReportContext::new(display(name, &node.path));
                 node.component.borrow().report(&report_context);
             }
-            report::summary(name, None);
+            report::summary(name, seeds::test_seed(), None);
             report::result()
         }
         RunEnd::Fatal { owner, error } => {
             set_phase(Phase::Check);
-            report::summary(name, Some((owner, error)));
+            report::summary(name, seeds::test_seed(), Some((owner, error)));
             Err(error.clone())
         }
     }

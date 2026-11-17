@@ -69,6 +69,13 @@ macro_rules! component {
 
         #[::veryl_component::component_impl]
         impl $ty {
+            fn on_build(
+                &mut self,
+                ctx: &mut ::veryl_component::BuildCtx,
+            ) -> ::veryl_component::Result<()> {
+                $crate::host::on_build(ctx)
+            }
+
             fn on_init(
                 &mut self,
                 ctx: &mut ::veryl_component::SimCtx,

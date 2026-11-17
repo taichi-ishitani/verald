@@ -1,0 +1,20 @@
+[package]
+name = "veryl-tbf-random"
+description = "Constrained random for veryl-tbf: SystemVerilog's rand, constraint and randomize() on Rust structs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+batsat = { version = "0.6", optional = true }
+num-bigint = "0.5"
+num-traits = "0.2"
+veryl-tbf-macros.workspace = true
+
+[features]
+default = ["batsat"]
+# The SAT solver behind `SatSolver`; without it, constrained randomization
+# needs a solver supplied through `set_solver_factory`.
+batsat = ["dep:batsat"]

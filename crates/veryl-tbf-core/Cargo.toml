@@ -11,4 +11,5 @@ publish.workspace = true
 inventory = "0.3"
 veryl-component.workspace = true
 veryl-tbf-macros.workspace = true
+veryl-tbf-random.workspace = true
 veryl-tbf-runtime.workspace = true

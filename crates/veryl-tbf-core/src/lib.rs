@@ -8,6 +8,7 @@ mod component;
 mod context;
 mod item;
 mod report;
+mod seeds;
 mod sequence;
 mod sequencer;
 mod test;
@@ -23,12 +24,11 @@ pub use context::{HasContext, InstanceContext, Knob};
 pub use item::ItemHandle;
 pub use report::Severity;
 pub use sequence::{HasBase, Sequence, SequenceCore};
-pub use sequencer::{
-    ArbRequest, Arbiter, FifoArbiter, Rng, SeqItemPort, Sequencer, SequencerHandle,
-};
+pub use sequencer::{ArbRequest, Arbiter, FifoArbiter, SeqItemPort, Sequencer, SequencerHandle};
 pub use test::{BundledSpecs, FromSetting, Methodology, Scenario, SetupContext, Spec, Test};
 pub use tlm::{AnalysisExport, AnalysisFifo, AnalysisPort, ItemWaiter, Subscriber};
 pub use veryl_tbf_macros::{component, register_test, sequence};
+pub use veryl_tbf_random::SeedSource;
 
 /// Bundles specs, applied in the order given: `bundled_specs![SlowWrites,
 /// InjectErrors]` is `BundledSpecs::new().with(SlowWrites).with(InjectErrors)`.

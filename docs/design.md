@@ -6,8 +6,9 @@ decisions made so far, the reasons behind them, and what is still open.
 Status: design in progress. Implemented: the runtime's core (step 1),
 clocking blocks with `run_with_reset` (step 2), the methodology's skeleton
 (step 3: components, phases, tests, specs and the runner), and TLM,
-sequences, sequencers and agents (step 4; `examples/regblock` puts them
-together). Next: constrained random (step 5). Notes
+sequences, sequencers and agents (step 4), test scenarios, and constrained
+random with seeds per component and sequence (step 5; `examples/regblock`
+puts them together). Notes
 marked "for now" record where the implementation stops short of the design.
 
 - [Principles](#principles)
@@ -582,7 +583,7 @@ impl Sequence for RandomWrites {
         for i in 0..self.count {
             let mut item = ApbItem::default();
             self.start_item(&mut item).await?;
-            self.randomize_with(&mut item, ..)?;    // the sequencer's context passed (step 5)
+            self.randomize_item(&mut item)?;        // under the sequencer's configuration
             self.finish_item(item).await?;
         }
         self.write(0x00, 0x1234).await?;          // layer 2
@@ -638,15 +639,24 @@ between a sequence, its driver and the monitors' subscribers:
 - An item's default constraints (declared on its type, applied at every
   randomization) may refer to a configuration without the item holding it:
   the type declares the context its constraints read
-  (`#[randomize(context = ApbConfig)]`), and the context is an argument of
-  the randomization (`item.randomize(&cfg)?`,
-  `randomize_with!(item, &cfg, { .. })?`). Within a sequence the framework
-  passes it (`self.randomize_with(&mut item, ..)`), taken by its type from
-  the sequencer's configuration, as tue's `set_context` gives an item its
-  configuration, but explicit: the call shows which configuration it was
-  randomized under, and an item never keeps a stale one. An item with no
-  context randomizes with no argument. The constraint syntax is settled
-  with constrained random (step 5).
+  (`#[randomize(context = ApbConfig)]`), the constraints read it as
+  `context.x` (a constant, as a set's `self.x`), and the context is an
+  argument of the randomization (`item.randomize(&cfg)?`,
+  `item.randomize_with(Set, &cfg)?`, `randomize_with!(item, &cfg, { .. })?`).
+  Within a sequence the framework passes it: `self.randomize_item(&mut
+  item)?` and `self.randomize_item_with(&mut item, Set)?` take the
+  sequencer's configuration (its `#[context]`'s), matched by type at
+  compile time, as tue's `set_context` gives an item its configuration,
+  but explicit: the call shows which configuration it was randomized
+  under, and an item never keeps a stale one; `self.config()` gives it for
+  an inline randomization (`randomize_with!(item, &self.config(), { ..
+  })`). The methods are `randomize_item`, not `randomize`, so that a
+  sequence that is itself random (`#[randomize]` on it, `seq.randomize()`)
+  keeps both. An item with no context randomizes with no argument (and is
+  randomized directly, `item.randomize()?`). A nested random object with a
+  context gets its parent's; one whose parent has none fails the
+  randomization (`Invalid`). The constraint syntax is the random crate's
+  ([random.md](random.md)).
 - The contents are reached with `borrow()` / `borrow_mut()` (a `RefCell`
   inside), the names `Instance<T>` uses during the run, not `read` / `write`,
   which would read as bus operations. A borrow must not be held across an
@@ -884,7 +894,7 @@ Decided:
   ```rust
   pub trait Arbiter: 'static {
       /// Picks the request to grant: an index into `requests`.
-      fn select(&mut self, requests: &[ArbRequest], rng: &mut Rng) -> usize;
+      fn select(&mut self, requests: &[ArbRequest], rng: &SeedSource) -> usize;
   }
 
   pub struct ArbRequest {
@@ -897,7 +907,7 @@ Decided:
   /// UVM's SEQ_ARB_FIFO: the oldest request.
   pub struct FifoArbiter;
   impl Arbiter for FifoArbiter {
-      fn select(&mut self, _requests: &[ArbRequest], _rng: &mut Rng) -> usize { 0 }
+      fn select(&mut self, _requests: &[ArbRequest], _rng: &SeedSource) -> usize { 0 }
   }
   ```
 
@@ -910,7 +920,7 @@ Decided:
     sequencer before the call, so an arbiter never deals with them, and
     adding them later does not change the interface.
   - `&mut self` lets an arbiter keep state (a round robin's last grant);
-    `rng` is the sequencer's generator, so a random arbiter keeps random
+    `rng` is the sequencer's seed source, so a random arbiter keeps random
     stability.
   - An index out of range is a fatal error naming the sequencer.
   - The arbiter is called once per grant, on the per-item path, so it is a
@@ -1454,8 +1464,20 @@ stops short for now:
   reachable with `borrow()` from the test's `run`). The generated
   components (a sequencer, an agent) are passive by the macro. An impl
   without the attribute is given a task, to be safe.
-- Arbiters get a small SplitMix64 `Rng` of the sequencer's, seeded 0, until
-  constrained random (step 5) brings the seeded generators.
+- Seeds are kept by `SeedSource` of the random crate: a SplitMix64
+  generator shared by its clones. One is made for every component (in
+  `Scope::create_instance`, before its `build`) and for every sequence (in
+  `start`), and is entered (made the thread's seed source) while its owner
+  builds or runs: `build` runs entered; a run task and a sequence's `body`
+  are wrapped in `seeded(source, future)`, which enters the source for the
+  span of each poll, so tasks interleaving on one thread never draw from
+  each other's sources. `randomize()` (an object's first seed),
+  `urandom()`, `randcase!` and `std_randomize!` take from the entered
+  source, else from the thread's own one (the random crate used on its
+  own). The test's source is entered for `setup` as well. A sequencer's
+  arbiter gets the sequencer's source, taken while it builds. The seed of
+  a source is FNV-1a over the names (type, path, and for a sequence its
+  count), mixed with the test's seed by SplitMix64.
 - The sequence item port follows UVM's sequencer: `item_done` removes the
   item at once (UVM's `m_req_fifo.try_get`), so `get_next_item` never sees
   it again; before choosing the next request, `get_next_item` and
@@ -1487,8 +1509,6 @@ stops short for now:
   running it, so every component is borrowed before any user code runs.
 - Reaching the error limit asks the runtime to end the run phase
   (`host::fatal`); it ends once the task that reported the error yields.
-- The report summary does not show the seed yet; seeds come with
-  constrained random (step 5).
 
 ## Taken from UVM
 

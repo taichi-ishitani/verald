@@ -11,6 +11,8 @@ use veryl_component::{InputPort, ModportRef, OutputPort};
 use veryl_tbf_runtime::{Clock, Reset, Signals, TestError, host, sim};
 
 use crate::report::{self, Severity};
+use crate::seeds;
+use veryl_tbf_random::SeedSource;
 
 /// What a component is, for the hierarchy printout and logs. Components of
 /// every kind are the same `Component`; the kind only names the role.
@@ -149,6 +151,8 @@ pub(crate) struct Node {
     pub(crate) path: Rc<str>,
     pub(crate) kind: Kind,
     pub(crate) passive: bool,
+    /// Entered while the component builds and runs.
+    pub(crate) source: SeedSource,
 
     pub(crate) component: Rc<RefCell<dyn ErasedComponent>>,
     pub(crate) children: Vec<Node>,
@@ -338,8 +342,22 @@ impl Scope {
         path: Rc<str>,
         context: T::Context,
     ) -> Result<Instance<T>, TestError> {
+        let source = seeds::component(std::any::type_name::<T>(), &path);
+        self.make_with::<T>(path, context, source)
+    }
+
+    /// Makes a component with its seed source, entered while it builds.
+    pub(crate) fn make_with<T: Component>(
+        &self,
+        path: Rc<str>,
+        context: T::Context,
+        source: SeedSource,
+    ) -> Result<Instance<T>, TestError> {
         let scope = Scope::new(path.clone());
-        let built = T::build(&scope, context).map_err(|error| {
+        let entered = source.enter();
+        let built = T::build(&scope, context);
+        drop(entered);
+        let built = built.map_err(|error| {
             let message = error.message().to_string();
             let already = BUILD_ERROR.with(|b| b.borrow().as_deref() == Some(&message));
             if already {
@@ -358,6 +376,7 @@ impl Scope {
             path: path.clone(),
             kind: T::KIND,
             passive: T::PASSIVE,
+            source,
             component: erased,
             children: scope.into_children(),
         });

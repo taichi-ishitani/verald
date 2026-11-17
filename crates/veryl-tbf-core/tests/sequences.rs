@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use veryl_component::Value;
 use veryl_component::testing::MockSim;
 use veryl_tbf_core::prelude::*;
-use veryl_tbf_core::{ArbRequest, Arbiter, Methodology, Rng};
+use veryl_tbf_core::{ArbRequest, Arbiter, Methodology, SeedSource};
 use veryl_tbf_runtime::{Clock, TestError, join};
 
 thread_local! {
@@ -153,7 +153,7 @@ impl Sequence for Both {
 struct ByPriority;
 
 impl Arbiter for ByPriority {
-    fn select(&mut self, requests: &[ArbRequest], _rng: &mut Rng) -> usize {
+    fn select(&mut self, requests: &[ArbRequest], _rng: &SeedSource) -> usize {
         let best = requests.iter().map(|r| r.priority).max().unwrap();
         requests.iter().position(|r| r.priority == best).unwrap()
     }

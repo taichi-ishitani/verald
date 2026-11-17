@@ -6,37 +6,12 @@ use std::future::poll_fn;
 use std::rc::Rc;
 use std::task::{Poll, Waker};
 
+use veryl_tbf_random::SeedSource;
 use veryl_tbf_runtime::TestError;
 
 use crate::component::TaskFuture;
 use crate::item::ItemHandle;
 use crate::sequence::SequenceCore;
-
-/// A small random generator for arbiters, until constrained random comes
-/// with its own (step 5): SplitMix64.
-#[derive(Clone, Debug)]
-pub struct Rng {
-    state: u64,
-}
-
-impl Rng {
-    pub fn new(seed: u64) -> Self {
-        Rng { state: seed }
-    }
-
-    pub fn next_u64(&mut self) -> u64 {
-        self.state = self.state.wrapping_add(0x9e37_79b9_7f4a_7c15);
-        let mut z = self.state;
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        z ^ (z >> 31)
-    }
-
-    /// A number below `n` (which must not be 0).
-    pub fn below(&mut self, n: u64) -> u64 {
-        self.next_u64() % n
-    }
-}
 
 /// A sequence waiting for the driver, as an arbiter sees it.
 #[derive(Clone, Debug)]
@@ -55,16 +30,17 @@ pub struct ArbRequest {
 /// The sequencer calls `select` only with at least one request, in the
 /// order they began waiting (the oldest at index 0), and only with the
 /// eligible ones (what `grab` / `lock` would exclude is filtered out first).
-/// An index out of range is a fatal error.
+/// An index out of range is a fatal error. `rng` is the sequencer's seed
+/// source, so a random arbiter keeps random stability.
 pub trait Arbiter: 'static {
-    fn select(&mut self, requests: &[ArbRequest], rng: &mut Rng) -> usize;
+    fn select(&mut self, requests: &[ArbRequest], rng: &SeedSource) -> usize;
 }
 
 /// UVM's `SEQ_ARB_FIFO`: the oldest request.
 pub struct FifoArbiter;
 
 impl Arbiter for FifoArbiter {
-    fn select(&mut self, _requests: &[ArbRequest], _rng: &mut Rng) -> usize {
+    fn select(&mut self, _requests: &[ArbRequest], _rng: &SeedSource) -> usize {
         0
     }
 }
@@ -94,7 +70,7 @@ struct State<Req, Rsp> {
     next_sequence_id: u64,
     next_transaction_id: u64,
     arbiter: Box<dyn Arbiter>,
-    rng: Rng,
+    rng: SeedSource,
     default: Option<Box<dyn FnOnce() -> TaskFuture>>,
 }
 
@@ -132,7 +108,8 @@ impl<Req, Rsp> Default for SequencerCore<Req, Rsp> {
                 next_sequence_id: 1,
                 next_transaction_id: 1,
                 arbiter: Box::new(FifoArbiter),
-                rng: Rng::new(0),
+                // Made while the sequencer builds: its own source.
+                rng: SeedSource::current().unwrap_or_else(|| SeedSource::new(0)),
                 default: None,
             })),
             name: RefCell::new(Rc::from("")),
@@ -151,7 +128,7 @@ impl<Req, Rsp> SequencerCore<Req, Rsp> {
         *self.name.borrow_mut() = name;
     }
 
-    fn name(&self) -> Rc<str> {
+    pub(crate) fn name(&self) -> Rc<str> {
         self.name.borrow().clone()
     }
 
@@ -256,7 +233,7 @@ impl<Req, Rsp> SequencerCore<Req, Rsp> {
         }
         let requests: Vec<ArbRequest> = s.waiting.iter().map(|w| w.request.clone()).collect();
         let state = &mut *s;
-        let index = state.arbiter.select(&requests, &mut state.rng);
+        let index = state.arbiter.select(&requests, &state.rng);
         if index >= state.waiting.len() {
             return Err(TestError::new(format!(
                 "`{}`: the arbiter chose request {index} of {}",

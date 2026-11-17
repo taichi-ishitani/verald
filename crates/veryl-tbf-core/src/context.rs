@@ -43,6 +43,11 @@ impl<C, S> InstanceContext<C, S> {
         &self.config
     }
 
+    /// The configuration, shared, to hold past a borrow of the component.
+    pub(crate) fn shared_config(&self) -> Rc<C> {
+        self.config.clone()
+    }
+
     /// Borrows the status; not across an `.await`.
     pub fn status(&self) -> Ref<'_, S> {
         self.status.borrow()

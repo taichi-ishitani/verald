@@ -47,3 +47,10 @@ impl From<veryl_component::Error> for TestError {
         TestError::new(format!("{error:#}"))
     }
 }
+
+/// A failed randomization, so that `?` carries it in a task or a sequence.
+impl From<veryl_tbf_random::RandError> for TestError {
+    fn from(error: veryl_tbf_random::RandError) -> Self {
+        TestError::new(error.to_string())
+    }
+}

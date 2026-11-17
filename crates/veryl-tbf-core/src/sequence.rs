@@ -4,9 +4,14 @@
 
 use std::cell::Ref;
 
+use std::rc::Rc;
+
+use veryl_tbf_random::{Constraints, RandError, Randomize, seeded};
 use veryl_tbf_runtime::TestError;
 
+use crate::context::HasContext;
 use crate::item::ItemHandle;
+use crate::seeds;
 use crate::sequencer::{Sequencer, SequencerHandle};
 
 /// What a sequence does: its body. The rest is `SequenceCore`.
@@ -99,7 +104,9 @@ pub trait SequenceCore: Sequence + Sized {
         fields.sequencer = sequencer.clone();
         fields.sequence_id = sequencer.core().new_sequence_id();
         fields.effective_priority = fields.priority.or(parent_priority).unwrap_or(100);
-        self.body().await
+        // Its own seed source, as UVM reseeds a sequence when it starts.
+        let source = seeds::sequence(Self::NAME, &sequencer.core().name());
+        seeded(source, self.body()).await
     }
 
     /// The sequencer it runs on, typed (UVM's `p_sequencer`, with no cast).
@@ -111,6 +118,36 @@ pub trait SequenceCore: Sequence + Sized {
     /// The handle of the sequencer it runs on.
     fn sequencer_handle(&self) -> &SequencerHandle<Self::Sequencer> {
         &self.__fields().sequencer
+    }
+
+    /// The sequencer's configuration (its `#[context]`'s), shared: the
+    /// context of an inline randomization,
+    /// `randomize_with!(item, &self.config(), { .. })`.
+    fn config(&self) -> Rc<<Self::Sequencer as HasContext>::Config>
+    where
+        Self::Sequencer: HasContext,
+    {
+        self.sequencer().context().shared_config()
+    }
+
+    /// Randomizes an item under the sequencer's configuration, the context
+    /// its type declares (`#[randomize(context = C)]`).
+    fn randomize_item<I>(&self, item: &mut I) -> Result<(), RandError>
+    where
+        I: Randomize,
+        Self::Sequencer: HasContext<Config = I::Context>,
+    {
+        item.randomize_in(&self.config())
+    }
+
+    /// `randomize_item` with a constraint set for this call only.
+    fn randomize_item_with<I, C>(&self, item: &mut I, set: C) -> Result<(), RandError>
+    where
+        I: Randomize,
+        C: Constraints<I>,
+        Self::Sequencer: HasContext<Config = I::Context>,
+    {
+        item.randomize_with_in(set, &self.config())
     }
 
     /// Waits until the sequencer grants the sequence the driver.

@@ -125,3 +125,29 @@ module regblock_reverse_test {
         $finish();
     }
 }
+
+#[test(regblock_random_test)]
+module regblock_random_test {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (clk);
+    inst bus: bus_if;
+    inst dut: regblock (
+        i_clk: clk       ,
+        i_rst: rst       ,
+        bus  : bus.slave ,
+    );
+    inst tb : $comp::tbf_regblock;
+
+    initial {
+        tb.set_clock("clk", clk);
+        tb.set_reset("rst", rst);
+        tb.set_interface("bus", bus.master);
+        tb.set_interface("bus_mon", bus.monitor);
+        tb.option("timeout", 100000);
+        tb.set("rounds", 2);
+        tb.start("RandomTest");
+        rst.assert(clk);
+        clk.next(100000);
+        $finish();
+    }
+}

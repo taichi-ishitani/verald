@@ -14,11 +14,15 @@
 //! ```
 
 pub use veryl_tbf_core as core;
+pub use veryl_tbf_random as random;
 pub use veryl_tbf_runtime as runtime;
 
 /// The names a testbench usually needs.
 pub mod prelude {
     pub use veryl_tbf_core::prelude::*;
+    pub use veryl_tbf_random::{
+        RandEnum, constraint_fn, constraints, randcase, randomize, randomize_with, std_randomize,
+    };
     pub use veryl_tbf_runtime::prelude::*;
 }
 
