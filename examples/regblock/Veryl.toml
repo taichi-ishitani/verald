@@ -1,5 +1,5 @@
 [project]
-name = "adder_env"
+name = "regblock"
 version = "0.1.0"
 
 [[components]]

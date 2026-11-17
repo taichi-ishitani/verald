@@ -5,6 +5,7 @@
 //! on: `veryl-tbf` (as `veryl_tbf::runtime`) or `veryl-tbf-runtime`.
 
 mod clocking;
+mod component;
 mod test;
 
 use proc_macro::TokenStream;
@@ -48,6 +49,28 @@ pub(crate) fn core() -> TokenStream2 {
         }
         _ => quote!(::veryl_tbf_core),
     }
+}
+
+/// Marks a component's struct and its `impl Component` with the component's
+/// kind: `#[component(driver)]` on both (they must agree). On the struct it
+/// also implements `HasContext` for a field marked `#[context]`; on the impl
+/// it sets the kind, checks that a test has a `run`, and with `passive`
+/// (`#[component(scoreboard, passive)]`) that the component has none.
+/// `#[component(sequencer(item = T))]` on a struct generates a whole
+/// sequencer (`response = R` for a response of another type).
+#[proc_macro_attribute]
+pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
+    expand(component::component(attr.into(), item.into()))
+}
+
+/// Makes a struct a sequence running on `sequencer`, with the protocol's
+/// fields `base` (`#[sequence(sequencer = ApbSequencer, base = ApbSeqBase)]`):
+/// inserts the core's fields and the base, implements `SequenceCore` and
+/// `HasBase`, and generates `new` over the struct's own fields. The struct's
+/// `impl Sequence` gives the body.
+#[proc_macro_attribute]
+pub fn sequence(attr: TokenStream, item: TokenStream) -> TokenStream {
+    expand(component::sequence(attr.into(), item.into()))
 }
 
 /// Registers a test, which the test module starts by name

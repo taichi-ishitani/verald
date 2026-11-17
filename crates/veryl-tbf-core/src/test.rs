@@ -17,7 +17,7 @@ use crate::report;
 /// scenario, and the run phase ends when it returns.
 pub trait Test: Component {
     /// Makes the configuration the test is built from (may randomize it).
-    fn setup(cx: &mut SetupContext) -> Result<Self::Context, TestError>;
+    fn setup(setup_context: &mut SetupContext) -> Result<Self::Context, TestError>;
 }
 
 /// A variation of a test: settings and callbacks before it is built, typed
@@ -177,6 +177,28 @@ pub fn start_test<T: Test, S: Spec<T>>(
         format_args!("hierarchy:\n{}", lines.join("\n")),
     );
 
+    // A handle left unbound fails the start, naming it, rather than the
+    // first sequence that would use it.
+    let mut nodes = Vec::new();
+    root.pre_order(&mut nodes);
+    let unbound: Vec<String> = nodes
+        .iter()
+        .flat_map(|node| {
+            let path = display(name, &node.path);
+            node.component
+                .borrow()
+                .unbound()
+                .into_iter()
+                .map(move |field| format!("`{path}.{field}`"))
+        })
+        .collect();
+    if !unbound.is_empty() {
+        return Err(TestError::new(format!(
+            "unbound handles: {}",
+            unbound.join(", ")
+        )));
+    }
+
     // Every component's run, parents before children; the test's is the
     // main task. Each first borrows its component and yields, so that all
     // are borrowed before any user code runs.
@@ -200,12 +222,22 @@ pub fn start_test<T: Test, S: Spec<T>>(
         let task = async move {
             let mut component = component.borrow_mut();
             yield_now().await;
-            let mut context = RunContext::new(path);
-            component.run(&mut context).await
+            let mut run_context = RunContext::new(path);
+            component.run(&mut run_context).await
         };
         if node.path.is_empty() {
             start.main(&owner, task);
         } else {
+            start.spawn(&owner, task);
+        }
+    }
+
+    // Default sequences, started with the run phase.
+    let mut nodes = Vec::new();
+    root.pre_order(&mut nodes);
+    for node in nodes {
+        if let Some(task) = node.component.borrow_mut().default_task() {
+            let owner = format!("{}.default_sequence", display(name, &node.path));
             start.spawn(&owner, task);
         }
     }
@@ -223,12 +255,12 @@ fn finish(name: &str, root: &Node, end: &RunEnd) -> Result<(), TestError> {
             let mut nodes = Vec::new();
             root.post_order(&mut nodes);
             for node in &nodes {
-                let mut context = CheckContext::new(display(name, &node.path));
-                node.component.borrow_mut().check(&mut context);
+                let mut check_context = CheckContext::new(display(name, &node.path));
+                node.component.borrow_mut().check(&mut check_context);
             }
             for node in &nodes {
-                let context = ReportContext::new(display(name, &node.path));
-                node.component.borrow().report(&context);
+                let report_context = ReportContext::new(display(name, &node.path));
+                node.component.borrow().report(&report_context);
             }
             report::summary(name, None);
             report::result()

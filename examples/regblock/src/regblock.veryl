@@ -1,0 +1,101 @@
+/// A simple bus: a request is accepted at an edge where `valid` and `ready`
+/// are both high; a read's data comes back at the next edge, with `rvalid`.
+interface bus_if {
+    var valid : logic    ;
+    var ready : logic    ;
+    var write : logic    ;
+    var addr  : logic<3> ;
+    var wdata : logic<16>;
+    var rvalid: logic    ;
+    var rdata : logic<16>;
+
+    modport master {
+        valid : output,
+        ready : input ,
+        write : output,
+        addr  : output,
+        wdata : output,
+        rvalid: input ,
+        rdata : input ,
+    }
+
+    modport slave {
+        valid : input ,
+        ready : output,
+        write : input ,
+        addr  : input ,
+        wdata : input ,
+        rvalid: output,
+        rdata : output,
+    }
+
+    modport monitor {
+        valid : input,
+        ready : input,
+        write : input,
+        addr  : input,
+        wdata : input,
+        rvalid: input,
+        rdata : input,
+    }
+}
+
+/// Eight 16-bit registers on the bus. `ready` drops one cycle in three.
+module regblock (
+    i_clk: input   clock         ,
+    i_rst: input   reset         ,
+    bus  : modport bus_if::slave ,
+) {
+    var regs : logic<16> [8];
+    var count: logic<2>     ;
+
+    assign bus.ready = count != 2;
+
+    always_ff {
+        if_reset {
+            for i in 0..8 {
+                regs[i] = 0;
+            }
+            count      = 0;
+            bus.rvalid = 0;
+            bus.rdata  = 0;
+        } else {
+            count      = if count == 2 ? 0 : count + 1;
+            bus.rvalid = bus.valid && bus.ready && !bus.write;
+            if bus.valid && bus.ready {
+                if bus.write {
+                    regs[bus.addr] = bus.wdata;
+                } else {
+                    bus.rdata = regs[bus.addr];
+                }
+            }
+        }
+    }
+}
+
+/// Runs the testbench's `RegTest` against the register block.
+#[test(regblock_test)]
+module regblock_test {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (clk);
+    inst bus: bus_if;
+    inst dut: regblock (
+        i_clk: clk       ,
+        i_rst: rst       ,
+        bus  : bus.slave ,
+    );
+    inst tb : $comp::tbf_regblock;
+
+    initial {
+        tb.set_clock("clk", clk);
+        tb.set_reset("rst", rst);
+        tb.set_interface("bus", bus.master);
+        tb.set_interface("bus_mon", bus.monitor);
+        tb.option("timeout", 100000);
+        tb.set("rounds", 2);
+        tb.start("RegTest");
+        rst.assert(clk);
+        clk.next(100000);
+        $finish();
+    }
+}

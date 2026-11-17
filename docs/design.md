@@ -4,8 +4,10 @@ A UVM-style verification framework in Rust for Veryl. This file records the
 decisions made so far, the reasons behind them, and what is still open.
 
 Status: design in progress. Implemented: the runtime's core (step 1),
-clocking blocks with `run_with_reset` (step 2), and the methodology's
-skeleton (step 3: components, phases, tests, specs and the runner). Notes
+clocking blocks with `run_with_reset` (step 2), the methodology's skeleton
+(step 3: components, phases, tests, specs and the runner), and TLM,
+sequences, sequencers and agents (step 4; `examples/regblock` puts them
+together). Next: constrained random (step 5). Notes
 marked "for now" record where the implementation stops short of the design.
 
 - [Principles](#principles)
@@ -197,9 +199,9 @@ Decided:
 
   | Phase | Does | Shape |
   |---|---|---|
-  | `run` | every component, concurrently | `async fn run(&mut self, context: &mut RunContext) -> Result<(), TestError>` |
-  | `check` | checks what the run left | `fn check(&mut self, context: &mut CheckContext)`, errors reported to `context` |
-  | `report` | summarizes | `fn report(&self, context: &ReportContext)` |
+  | `run` | every component, concurrently | `async fn run(&mut self, run_context: &mut RunContext) -> Result<(), TestError>` |
+  | `check` | checks what the run left | `fn check(&mut self, check_context: &mut CheckContext)`, errors reported to `check_context` |
+  | `report` | summarizes | `fn report(&self, report_context: &ReportContext)` |
 
   UVM's extract folds into `check`. end_of_elaboration,
   start_of_simulation and final are added when needed. There are no runtime
@@ -239,6 +241,16 @@ Decided:
 - Every component's `run` is concurrent; a parent never waits for its
   children.
 
+- Any component (a sequencer too) may hold its context, as tue gives every
+  component one: the field marked `#[context]`, of type
+  `InstanceContext<C, S>`, for which `#[component(..)]` on the struct
+  implement `HasContext` (`Config`, `Status`, `context()`), so it is reached
+  the same way everywhere: `driver.context().config()`,
+  `self.sequencer().context().config()` in a sequence. A component with no
+  such field has none (a scoreboard, a virtual sequencer). A sequencer
+  holding only its context is built from it, its `build` generated:
+  `scope.create_instance::<ApbSequencer>("sequencer", context.clone())?`;
+  one with other fields names its `Context` in the attribute.
 - A component's configuration and status travel together as an
   `InstanceContext<C, S>`: the configuration `C`, fixed after construction
   and shared with `Rc`, and the status `S`, written by the components
@@ -350,11 +362,11 @@ Decided:
   // the VIP
   pub trait ApbDriverCallbacks: 'static {
       /// Before driving: may change the item (error injection) or skip it.
-      fn pre_drive(&self, _item: &mut ApbItem, _cx: &mut CallbackContext) -> Action { Action::Go }
+      fn pre_drive(&self, _item: &mut ApbItem, _callback_context: &mut CallbackContext) -> Action { Action::Go }
       /// Cycles to wait before driving.
-      fn delay(&self, _item: &ApbItem, _cx: &mut CallbackContext) -> u32 { 0 }
+      fn delay(&self, _item: &ApbItem, _callback_context: &mut CallbackContext) -> u32 { 0 }
       /// After the response.
-      fn post_drive(&self, _item: &ApbItem, _rsp: &ApbResponse, _cx: &mut CallbackContext) {}
+      fn post_drive(&self, _item: &ApbItem, _rsp: &ApbResponse, _callback_context: &mut CallbackContext) {}
   }
 
   pub struct ApbConfig {
@@ -363,7 +375,7 @@ Decided:
   }
 
   // the driver's run, at each point
-  let delay = callbacks.sum(|c| c.delay(&item, &mut cx));
+  let delay = callbacks.sum(|c| c.delay(&item, &mut callback_context));
 
   // a spec's pre_build
   fn pre_build(&self, config: &mut RegTestConfig) {
@@ -401,7 +413,7 @@ type, plus a spec applied between and after the two steps.
 // framework
 pub trait Test: Component {
     /// Makes the configuration (may randomize it): the test's `Context`.
-    fn setup(cx: &mut SetupContext) -> Result<Self::Context, TestError>;
+    fn setup(setup_context: &mut SetupContext) -> Result<Self::Context, TestError>;
 }
 
 pub trait Spec<T: Test> {
@@ -413,15 +425,15 @@ pub struct BundledSpecs<T: Test> { specs: Vec<Box<dyn Spec<T>>> } // applied in 
 impl<T: Test> Spec<T> for BundledSpecs<T> { .. }
 
 // the framework's new for a test, at start
-let mut config = T::setup(&mut cx)?;
+let mut config = T::setup(&mut setup_context)?;
 spec.pre_build(&mut config);
 let mut test = scope.create_root::<T>(config)?;          // T::build
 spec.post_build(&mut test);
 
 // a test: setup and build, no spec in sight
 impl Test for RegTest {
-    fn setup(cx: &mut SetupContext) -> Result<RegTestConfig, TestError> {
-        Ok(RegTestConfig::new(cx))
+    fn setup(setup_context: &mut SetupContext) -> Result<RegTestConfig, TestError> {
+        Ok(RegTestConfig::new(setup_context))
     }
 }
 impl Component for RegTest {
@@ -430,7 +442,7 @@ impl Component for RegTest {
         let env = scope.create_instance::<Env>("env", config.env)?;
         Ok(RegTest { env })
     }
-    async fn run(&mut self, context: &mut RunContext) -> Result<(), TestError> { .. }
+    async fn run(&mut self, run_context: &mut RunContext) -> Result<(), TestError> { .. }
 }
 ```
 
@@ -452,32 +464,48 @@ also write a named bundle of their own. A spec implements only the methods
 it needs and is used up while the test is made, so the test keeps neither
 it nor a type parameter for it; the build itself (how the env is made) is
 never rewritten. `SetupContext` gives the setup the settings the test
-module passed with `set` (`cx.get`, see [Runner](#runner)), random numbers
+module passed with `set` (`setup_context.get`, see [Runner](#runner)), random numbers
 (from the test's seed) and logging.
 
 The hierarchy is built in one place, so it is the same for every test.
 
 ## Sequences
 
-Decided: three layers, as `uvm_sequence_base`, a protocol's sequence base,
-and the sequences that generate items.
+Decided: three layers, as UVM's `uvm_sequence_base`, a protocol's sequence
+base, and the sequences that generate items.
 
-| Layer | Fields declared by | Methods |
-|---|---|---|
-| 1. sequence base | the framework (`SeqBase`: the sequencer, the parent sequence, the current item, ids, rng, logger, priority) | `Sequence` trait: required `body`; provided `start_item`, `finish_item`, `send`, `start`, `sequencer` |
-| 2. protocol base | the VIP, in a struct marked `#[sequence_base(item = ..)]`, which embeds `SeqBase` (`parent = ..` for more levels) | a protocol trait with default methods, e.g. `ApbSequence: Sequence<..> + HasBase<ApbSeqBase>`, given to every such sequence by a blanket impl |
-| 3. sequence | its author | `body` only |
+| Layer | Fields | Methods | Written by |
+|---|---|---|---|
+| 1. sequence core | the framework's, inserted by `#[sequence]`: the sequencer, the parent sequence, ids, priority, the random generator | `SequenceCore`: `start`, `start_item`, `finish_item`, `sequencer` | the framework (`#[sequence]` implements it) |
+| 2. protocol base | a plain struct of the VIP's (`Default`), inserted by `#[sequence(base = ..)]`, reached through `HasBase<T>` | a trait of the VIP's over `SequenceCore + HasBase<T>`, with a blanket impl | the VIP's author, with no macro |
+| 3. sequence | its author's | `Sequence`: `body` | the sequence's author |
 
 ```rust
-#[sequence(base = ApbSeqBase)]       // inserts the base as a hidden field
-struct RandomWrites { count: usize }
+// the VIP: fields every APB sequence has, and methods over them
+#[derive(Default)]
+pub struct ApbSeqBase {
+    pub prot: u8,
+}
+
+pub trait ApbSequence: SequenceCore<Sequencer = ApbSequencer> + HasBase<ApbSeqBase> {
+    async fn write(&mut self, addr: u32, data: u32) -> Result<ItemHandle<ApbItem>, TestError> {
+        let mut item = ApbItem { write: true, addr, data, prot: self.base().prot };
+        self.start_item(&mut item).await?;
+        self.finish_item(item).await
+    }
+}
+impl<S> ApbSequence for S where S: SequenceCore<Sequencer = ApbSequencer> + HasBase<ApbSeqBase> {}
+
+// a sequence
+#[sequence(sequencer = ApbSequencer, base = ApbSeqBase)]
+pub struct RandomWrites { count: usize }
 
 impl Sequence for RandomWrites {
     async fn body(&mut self) -> Result<(), TestError> {
-        for _ in 0..self.count {
-            let mut item = ApbItem::new(self.context().config());
+        for i in 0..self.count {
+            let mut item = ApbItem::default();
             self.start_item(&mut item).await?;
-            randomize_with!(item, { address < 0x20; })?;
+            self.randomize_with(&mut item, ..)?;    // the sequencer's context passed (step 5)
             self.finish_item(item).await?;
         }
         self.write(0x00, 0x1234).await?;          // layer 2
@@ -486,17 +514,18 @@ impl Sequence for RandomWrites {
 }
 ```
 
-- The base is composed into the sequence by a proc macro (`#[sequence]`),
-  which also implements the accessor traits (`HasSeqBase`, `HasBase<T>`).
-  The accessor trait is separate from `Sequence` so that a macro on the
-  struct can implement it without touching the author's `impl Sequence`.
+- The user writes `Sequence` (`body`) only; the core, `SequenceCore`, is the
+  framework's and `#[sequence]` implements it, so the author's `impl
+  Sequence` and the macro's impl do not meet. The names follow UVM's
+  `uvm_sequence` and `uvm_sequence_base`.
+- The protocol layer is a plain struct and a trait: VIP authors write no
+  macro. More layers nest: a base struct holds the one below it, and the
+  trait above reaches it through it.
 - `start` belongs to the framework, so it sets the sequencer (UVM's
   `m_sequencer`) before `body`; every layer sees the same sequencer.
-- Every base struct implements `Default`. The macro generates `new(..)` over
-  the author's fields, which then need not be `Default`; a struct literal with
-  `..Default::default()` works when they are.
-- VIP authors write no proc macros; the macros are the framework's.
-- A protocol context (configuration) is reached through the sequencer
+- The macro generates `new(..)` over the author's fields, which then need
+  not be `Default`; the inserted fields start at their defaults.
+- A protocol's configuration is reached through the sequencer's context
   (see below).
 
 ### Items
@@ -504,6 +533,9 @@ impl Sequence for RandomWrites {
 Decided: items are shared once sent, as UVM passes one object by handle
 between a sequence, its driver and the monitors' subscribers:
 
+- An item is a plain struct of the user's (`#[derive(Clone, Debug)]`); what
+  the framework records about it (its sequence and transaction ids, its
+  begin and end) lives in the handle, so items need no macro.
 - A sequence builds and randomizes an item as a plain value (`&mut`), and
   `finish_item` turns it into an `ItemHandle<T>` (an `Rc` underneath),
   which it returns: the sequence keeps the item and reads what the driver
@@ -526,6 +558,18 @@ between a sequence, its driver and the monitors' subscribers:
   }                                        // the borrow ends before any wait
   ```
 
+- An item's default constraints (declared on its type, applied at every
+  randomization) may refer to a configuration without the item holding it:
+  the type declares the context its constraints read
+  (`#[randomize(context = ApbConfig)]`), and the context is an argument of
+  the randomization (`item.randomize(&cfg)?`,
+  `randomize_with!(item, &cfg, { .. })?`). Within a sequence the framework
+  passes it (`self.randomize_with(&mut item, ..)`), taken by its type from
+  the sequencer's configuration, as tue's `set_context` gives an item its
+  configuration, but explicit: the call shows which configuration it was
+  randomized under, and an item never keeps a stale one. An item with no
+  context randomizes with no argument. The constraint syntax is settled
+  with constrained random (step 5).
 - The contents are reached with `borrow()` / `borrow_mut()` (a `RefCell`
   inside), the names `Instance<T>` uses during the run, not `read` / `write`,
   which would read as bus operations. A borrow must not be held across an
@@ -536,18 +580,24 @@ between a sequence, its driver and the monitors' subscribers:
 ### Sequencers and virtual sequences
 
 A sequencer is a component in the hierarchy, as in UVM, and its type is the
-user's: `#[sequencer(item = ..)]` embeds the base sequencer (item queue,
-arbitration) in a struct with fields of the user's own. A virtual sequencer
-is the same thing with sub-sequencers among its fields; it is made in the env
-like any other component.
+user's: `#[component(sequencer(item = ..))]` on a struct generates a whole
+sequencer around fields of the user's own: the core (item queue,
+arbitration, default sequence), `Sequencer`, and its `Component`, built from
+its fields (one field: that field's value; several: a tuple, in order).
+`response = ..` gives a response type other than the item's. A virtual
+sequencer is the same thing with sub-sequencers among its fields; it is made
+in the env like any other component. A sequencer is passive (no run task),
+so its fields stay reachable during the run phase; `instance.handle()` gives
+the `SequencerHandle` sequences start on and a driver's port connects to.
 
 ```rust
-#[sequencer(item = ApbItem)]
+#[component(sequencer(item = ApbItem))]
 pub struct ApbSequencer {
-    pub context: InstanceContext<ApbConfig>,        // what sequences on it may need
+    #[context]
+    context: InstanceContext<ApbConfig>,            // what sequences on it may need
 }
 
-#[sequencer(item = ())]                             // virtual: no driver behind it
+#[component(sequencer(item = ()))]                  // virtual: no driver behind it
 pub struct SocSequencer {
     pub apb: SequencerHandle<ApbSequencer>,
     pub axi: SequencerHandle<AxiSequencer>,
@@ -557,6 +607,8 @@ pub struct SocSequencer {
 let apb = scope.create_instance::<ApbAgent>("apb", apb_context)?;
 let axi = scope.create_instance::<AxiAgent>("axi", axi_context)?;
 let vseqr = scope.create_instance::<SocSequencer>("vseqr", (apb.sequencer(), axi.sequencer()))?;
+// the agent's build: the driver's port to its sequencer
+driver.port.connect(&sequencer.handle());
 ```
 
 A sequence names the sequencer type it runs on, and `start` takes exactly
@@ -610,12 +662,12 @@ InitThenTraffic::new(10).start(&self.vseqr).await?;
   needs a given count checks it itself.
 
   ```rust
-  #[sequencer(item = ())]
-  pub struct MultiApbSequencer {                // its Context is (): filled after it is made
+  #[component(sequencer(item = ()))]
+  pub struct MultiApbSequencer {                // its Context is its one field: filled after it is made
       pub apb: Vec<SequencerHandle<ApbSequencer>>,
   }
 
-  let mut vseqr = scope.create_instance::<MultiApbSequencer>("vseqr", ())?;
+  let mut vseqr = scope.create_instance::<MultiApbSequencer>("vseqr", Vec::new())?;
   for agent in &apb {
       vseqr.apb.push(agent.sequencer());
   }
@@ -624,22 +676,21 @@ InitThenTraffic::new(10).start(&self.vseqr).await?;
 ### Default sequence
 
 Decided: as in UVM and OVM, a sequencer runs a default sequence in the run
-phase when one is set. It is set typed, in the sequencer's configuration
-(before the build) or through its handle (after it):
+phase when one is set. It is set typed, through the sequencer's handle,
+before the run phase:
 
 ```rust
-// a spec's pre_build: the agent's configuration carries its sequencer's
-config.env.apb.default_sequence.set(|| RandomWrites::new(10));
-// or a spec's post_build, through the handle the env keeps
+// a spec's post_build, through the handle the env keeps
 test.env.apb.set_default_sequence(|| RandomWrites::new(10));
 ```
 
-- It is a `DefaultSequence<S>`, typed by the sequencer, so a sequence for
-  another sequencer type does not compile. One value: the last set wins.
-- The value is a function that builds the sequence; the sequencer calls it
-  once at the start of its `run` and starts the sequence on itself. The
-  sequencer's part of `run` is the framework's (from `#[sequencer]`), so a
-  sequencer's author writes nothing for it.
+- The function's sequence must run on that sequencer's type, so another
+  does not compile. One value: the last set wins.
+- The framework calls the function when the run phase starts and starts
+  the sequence on the sequencer, as a task of its own; a sequencer's author
+  writes nothing for it.
+- For now it is set through the handle only; setting it in the sequencer's
+  configuration before the build (a `DefaultSequence<S>` field) is to come.
 - A default sequence runs in the background: the run phase ends with the
   test's `run`, not with it, and it is dropped with the other `run`s. It
   suits traffic that only accompanies the scenario (idle traffic, a
@@ -672,7 +723,7 @@ to things without a `run`. Three ways to receive:
 
 | Receiver | Connect | For |
 |---|---|---|
-| a passive component (`#[component(passive)]`, implements `PassiveComponent`: no `run`, still `check` / `report`) | `port.connect(&instance, id)` | scoreboards, coverage: components that only react |
+| a passive component (`#[component(scoreboard, passive)]` on its impl, which then cannot have a `run`; still `check` / `report`) | `port.connect(&instance, id)` | scoreboards, coverage: components that only react |
 | a plain shared object (no path, no phases) | `port.subscribe(closure)` | reference and expected-value models, ad-hoc logging |
 | an `AnalysisFifo<T>` field of a component with a `run`, which reads it there; the component exposes the FIFO's `AnalysisExport<T>` | `port.connect_export(&export)` | receivers that must wait for time (a response due within N cycles) |
 
@@ -829,16 +880,16 @@ Decided:
   pub trait Component: Sized + 'static {
       type Context;
       fn build(scope: &Scope, context: Self::Context) -> Result<Self, TestError>;
-      async fn run(&mut self, _context: &mut RunContext) -> Result<(), TestError> { Ok(()) }
-      fn check(&mut self, _context: &mut CheckContext) {}
-      fn report(&self, _context: &ReportContext) {}
+      async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> { Ok(()) }
+      fn check(&mut self, _check_context: &mut CheckContext) {}
+      fn report(&self, _report_context: &ReportContext) {}
   }
 
   trait ErasedComponent {
-      fn run<'a>(&'a mut self, context: &'a mut RunContext)
+      fn run<'a>(&'a mut self, run_context: &'a mut RunContext)
           -> Pin<Box<dyn Future<Output = Result<(), TestError>> + 'a>>;
-      fn check(&mut self, context: &mut CheckContext);
-      fn report(&self, context: &ReportContext);
+      fn check(&mut self, check_context: &mut CheckContext);
+      fn report(&self, report_context: &ReportContext);
   }
 
   impl<T: Component> ErasedComponent for T { .. }   // forwards; boxes run's future
@@ -870,10 +921,10 @@ Decided:
     `Deref` checks the phase and the `RefCell`'s state and returns the
     reference unguarded; no reference from outside the run phase survives
     into it, since the code that took it has returned.
-  - A passive component (`PassiveComponent`, no `run`) becomes an
-    `ErasedComponent` through a blanket impl of its own, which gives it no
-    run task: it is never borrowed for the run phase, so port writes can
-    borrow it meanwhile.
+  - A passive component (`#[component(.., passive)]`, no `run`), and any
+    component without a `run` of its own, gets no run task: it is never
+    borrowed for the run phase, so port writes, and `borrow()` from other
+    tasks, reach it meanwhile.
   - The futures are not `Send`, as intended; the `async_fn_in_trait` lint,
     which warns about exactly that, is allowed.
   - The cost of erasure is one boxed future per component and one borrow per
@@ -1257,8 +1308,8 @@ Decided:
     and their types.
   - `set(key, value)`: the testbench's settings from the design, kept as
     given until the test's `setup` reads them typed:
-    `cx.get::<usize>("num_masters")?` (failing if missing or mismatched) or
-    `cx.get_or("num_masters", 1)?`. A key no one has read once `setup`
+    `setup_context.get::<usize>("num_masters")?` (failing if missing or mismatched) or
+    `setup_context.get_or("num_masters", 1)?`. A key no one has read once `setup`
     returns is an error, so a misspelt key is not ignored. The two never
     share a key space, so a testbench may name a setting as it likes.
   - The runtime's exported component has the two generic methods and hands
@@ -1291,7 +1342,7 @@ hierarchy.
 | `veryl-tbf` | the entry point users depend on: re-exports the others, with a prelude; `core` can be left out by a feature |
 | `veryl-tbf-runtime` | the executor, tasks and their concurrency (`fork_scope`, `join`, `first`), waits for clocks and resets (`run_with_reset`), the shared parts (`Fifo`, events), clocking blocks, the simulator boundary and Veryl's adapter, the timeout, unexpected finishes, panic detection |
 | `veryl-tbf-core` | the UVM-like part: `Component`, `Test`, `Instance`, `Scope`, the phases, `Knob`, `Callbacks`, TLM, items (`ItemHandle`), sequences and sequencers, agents' and monitors' helpers, `ItemWaiter`, `Spec` / `BundledSpecs`, the runner (`register_test!`, test selection, reporting, the error limit) |
-| `veryl-tbf-macros` | the proc macros of both (`#[clocking]`, `#[modport]`, the wait macros; `#[component(..)]`, `#[sequence_item]`, `#[sequence_base]`, `#[sequence]`, `#[sequencer]`, `register_test!`, `bundled_specs!`) |
+| `veryl-tbf-macros` | the proc macros of both (`#[clocking]`, `#[modport]`, the wait macros; `#[component(..)]`, `#[sequence]`, `register_test!`; `bundled_specs!` is a `macro_rules!` of the core) |
 | `veryl-tbf-random` | constrained random; depends on nothing else here, so it can be used on its own |
 
 What each side holds where they meet:
@@ -1315,11 +1366,42 @@ stops short for now:
 
 - The runtime's fork scope is `ForkScope` (`fork_scope(async |scope| ..)`),
   apart from the methodology's `Scope`.
-- A component's kind and passiveness are, for now, the constants
-  `Component::KIND` and `Component::PASSIVE`; the `#[component(..)]`
-  attribute (kinds, `passive`, the agent's generation, a test required to
-  have a `run`) comes with step 4. A passive component's `run`, if written,
-  is not run.
+- `#[component(kind)]` goes on both a component's struct and its
+  `impl Component`, as a marker on each: on the struct it records the kind
+  (and implements `HasContext` for a `#[context]` field); on the impl it
+  sets `Component::KIND` / `PASSIVE`, fails to compile if the struct's kind
+  differs or the struct has no attribute, and checks `run`: a component
+  with a `run` is not `passive`, one without is (`#[component(env,
+  passive)]`), and a test has one. A passive component gets no run task, so
+  it is never borrowed during the run phase (an env or agent stays
+  reachable with `borrow()` from the test's `run`). The generated
+  components (a sequencer, an agent) are passive by the macro. An impl
+  without the attribute is given a task, to be safe.
+- Arbiters get a small SplitMix64 `Rng` of the sequencer's, seeded 0, until
+  constrained random (step 5) brings the seeded generators.
+- The sequence item port follows UVM's sequencer: `item_done` removes the
+  item at once (UVM's `m_req_fifo.try_get`), so `get_next_item` never sees
+  it again; before choosing the next request, `get_next_item` and
+  `try_next_item` yield once, as UVM's `wait_for_sequences` waits for the
+  NBA region, so that a sequence woken in the same hook (the one whose item
+  just ended) asks before the choice and priorities hold.
+- An agent generated by `#[component(agent(monitor = M, sequencer = S,
+  driver = D))]` takes its monitor's `Context` as its own (an
+  `InstanceContext` whose configuration implements `AgentConfig`), hands
+  clones of it to its parts, and adds public fields `monitor`,
+  `sequencer` (optional) and `driver` (optional). The struct's own fields
+  start at their defaults; `post_build` calls the agent's
+  `post_build(&mut self, scope: &Scope) -> Result<(), TestError>` after the
+  parts are made and connected, for more children or connections (named
+  after `Spec::post_build`, which also runs after `build`). It finds its parts'
+  ports by field markers that `#[component(..)]` on the parts' structs reads:
+  `#[analysis_port]` (`MonitorPort`), `#[seq_item_port]` (`DriverPort`),
+  `#[request_port]` (`RequestPort`, for `reactive`). A `#[context]` field may
+  be written with a type alias of an `InstanceContext`.
+- `SeqItemPort::put_response(&request, response)` takes the request's
+  handle, whose transaction id matches the response; a sequence waits with
+  `self.get_response(&request)`. A child sequence started with
+  `start_from(&sequencer, parent)` inherits the parent's priority.
 - The test is the root: its path is empty, its children's paths have no
   prefix (`env.driver`), and messages name it by the name it was registered
   under. The hierarchy is printed at the debug level when the test starts.
@@ -1339,7 +1421,7 @@ phases, TLM, sequences and sequencers, callbacks):
 | UVM | Here |
 |---|---|
 | `uvm_object`'s field automation | Rust's own: `Clone` (copy), `Debug` (print), `PartialEq` (compare); bit packing by a derive. A compare that reports where items differ is added when needed |
-| `uvm_sequence_item` | a trait for items, with the transaction id responses are matched by |
+| `uvm_sequence_item` | a plain struct shared as `ItemHandle<T>`, which holds the transaction id responses are matched by (see [Items](#items)) |
 | `uvm_event` | the runtime's events (`trigger`, `wait`, carrying data) |
 | `uvm_env`, `uvm_agent`, `uvm_driver`, `uvm_monitor`, `uvm_scoreboard`, .. | no types (in UVM they are nearly empty subclasses that name a role); a marker in the component attribute instead: `#[component(monitor)]`, `#[component(scoreboard, passive)]`, one attribute so that `test` does not clash with Rust's `#[test]`. Kinds: `test`, `env`, `agent`, `driver`, `monitor`, `sequencer`, `scoreboard`, `subscriber`. The kind shows in the hierarchy printout and in logs and can be queried; checks by kind (a monitor driving nothing) may come later |
 | verbosity | log levels with a threshold (see [Components](#components)) |
@@ -1379,8 +1461,8 @@ what VIPs keep writing; veryl-tbf takes these in:
 |---|---|
 | configuration and status on every component, sequence and item (`set_context`), passed to items and sequences through a proxy on the sequencer | `InstanceContext<C, S>`; sequences and items reach it typed through the sequencer's handle, so no proxy |
 | `tue_test::create_configuration` | `Test::setup` |
-| `tue_param_agent` (an agent over its monitor, sequencer and driver types: makes them as the agent is active or passive, connects them, optionally keeps a sequencer when passive) | the component attribute takes the parts and generates the agent into the VIP's own struct: `#[component(agent(monitor = ApbMonitor, sequencer = ApbSequencer, driver = ApbDriver))] pub struct ApbAgent { .. }` (the parts nested under `agent`, so that `monitor` as a part is not read as the `monitor` kind). It generates the parts' fields, the `build` (making the driver when active, the sequencer when active or asked for when passive, and the connections) and the usual accessors (`sequencer()`, `analysis_port()`); the VIP may add fields (a coverage collector) and methods (`driver_callbacks()`) to the same struct. Active or passive comes from an `AgentConfig` trait on the configuration, which hand-written agents use too. A generic `Agent<M, S, D>` type was set aside: methods cannot be added to another crate's type, and a VIP would have had to rewrite the agent as soon as it left the standard shape |
-| `tue_reactive_agent` / `_monitor` / `_sequencer` / `_sequence` (the monitor sends requests to the sequencer, a reactive sequence takes them with `get_request` and answers) | the same, for slaves and responders: `#[component(agent(reactive, ..))]` connects the monitor's request port to the sequencer's request FIFO, and a sequence on it waits with `self.sequencer().get_request().await`. A responding sequence suits being the default sequence |
+| `tue_param_agent` (an agent over its monitor, sequencer and driver types: makes them as the agent is active or passive, connects them, optionally keeps a sequencer when passive) | the component attribute takes the parts and generates the agent into the VIP's own struct: `#[component(agent(monitor = ApbMonitor, sequencer = ApbSequencer, driver = ApbDriver))] pub struct ApbAgent { .. }` (the parts nested under `agent`, so that `monitor` as a part is not read as the `monitor` kind). It generates the parts' fields, the `build` (making the driver when active, the sequencer when active or asked for when passive, and the connections) and the usual accessors (`sequencer_handle()`, `analysis_port()`, `context()`); the VIP may add fields (a coverage collector, made in the agent's `post_build` hook) and methods (`driver_callbacks()`) to the same struct. Active or passive comes from an `AgentConfig` trait on the configuration, which hand-written agents use too. A generic `Agent<M, S, D>` type was set aside: methods cannot be added to another crate's type, and a VIP would have had to rewrite the agent as soon as it left the standard shape |
+| `tue_reactive_agent` / `_monitor` / `_sequencer` / `_sequence` (the monitor sends requests to the sequencer, a reactive sequence takes them with `get_request` and answers) | the same, for slaves and responders: `#[component(agent(reactive, ..))]` connects the monitor's request port to the sequencer's request FIFO when the agent is active (as tue: a passive agent's kept sequencer has no driver to answer through), and a sequence on it waits with `self.get_request().await` (`ReactiveSequence`, for any sequence on a sequencer made with `request = R`). A responding sequence suits being the default sequence |
 | `tue_param_monitor` (`item_port`; `create_item` begins a transaction, `write_item` ends and publishes it) | helpers for monitors: the analysis port and the begin / end marking of an item |
 | item begin / end events (`wait_for_beginning`, `wait_for_ending`) | items have begin and end events, so that a sequence can wait for the transfer to finish, apart from its response. An event is made when first asked for, as UVM's event pool makes one on its first `get("end")`, so only an item someone waits on allocates one; a driver or monitor marks begin and end on any item (`item.mark_end()`), a no-op when no one asked. Since items are shared (see [Items](#items)), a mark reaches every holder: the driver's reaches the sequence, and a monitor's reaches a reactive sequence that took the request |
 | `tue_item_waiter` (waits for the next item, or one matching a key) | `ItemWaiter<T, K>`, a shared object subscribed to an analysis port: `next().await`, `by_key(k).await`, from a test's `run` |
@@ -1407,6 +1489,15 @@ None at present; deferred work is under [TODO](#todo).
 - Choosing the test at run time (`+UVM_TESTNAME`), once Veryl passes
   arguments into a simulation (see below): the runner would take the test's
   name, and the options, from them.
+
+- Ports put in by the attribute: a driver's `#[seq_item_port]` and a
+  monitor's `#[analysis_port]` fields are always the same shape, but the
+  attribute cannot add them, since the user's `build` writes the struct
+  literal and would still have to initialise a field it does not see
+  declared. Revisit when Rust's default field values (`default_field_values`,
+  nightly only) are stable: the attribute would add
+  `seq_item_port: SeqItemPort<T, R> = SeqItemPort::new()` and `build` would
+  end its literal with `..`.
 
 The UVM features left for later are listed under
 [Taken from UVM](#taken-from-uvm).

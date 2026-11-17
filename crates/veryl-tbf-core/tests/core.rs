@@ -34,19 +34,19 @@ impl Component for Counter {
         Ok(Counter { clk, count: 0 })
     }
 
-    async fn run(&mut self, _cx: &mut RunContext) -> Result<(), TestError> {
+    async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
         loop {
             self.clk.edge().await;
             self.count += 1;
         }
     }
 
-    fn check(&mut self, cx: &mut CheckContext) {
-        log(format!("check {} ({})", cx.path(), self.count));
+    fn check(&mut self, check_context: &mut CheckContext) {
+        log(format!("check {} ({})", check_context.path(), self.count));
     }
 
-    fn report(&self, cx: &ReportContext) {
-        log(format!("report {}", cx.path()));
+    fn report(&self, report_context: &ReportContext) {
+        log(format!("report {}", report_context.path()));
     }
 }
 
@@ -66,10 +66,10 @@ impl Component for Board {
         Ok(Board::default())
     }
 
-    fn check(&mut self, cx: &mut CheckContext) {
-        log(format!("check {} {:?}", cx.path(), self.seen));
+    fn check(&mut self, check_context: &mut CheckContext) {
+        log(format!("check {} {:?}", check_context.path(), self.seen));
         if self.fail {
-            cx.error("told to fail");
+            check_context.error("told to fail");
         }
     }
 }
@@ -99,8 +99,8 @@ impl Component for Env {
         Ok(Env { counters, board })
     }
 
-    fn check(&mut self, cx: &mut CheckContext) {
-        log(format!("check {}", cx.path()));
+    fn check(&mut self, check_context: &mut CheckContext) {
+        log(format!("check {}", check_context.path()));
     }
 }
 
@@ -148,10 +148,10 @@ impl Component for BasicTest {
         })
     }
 
-    async fn run(&mut self, cx: &mut RunContext) -> Result<(), TestError> {
+    async fn run(&mut self, run_context: &mut RunContext) -> Result<(), TestError> {
         for _ in 0..self.errors {
             self.clk.edge().await;
-            cx.error("an error");
+            run_context.error("an error");
         }
         self.clk.wait(self.cycles).await;
         if self.deref_in_run {
@@ -162,21 +162,21 @@ impl Component for BasicTest {
         Ok(())
     }
 
-    fn check(&mut self, cx: &mut CheckContext) {
+    fn check(&mut self, check_context: &mut CheckContext) {
         let counts: Vec<u64> = self.env.counters.iter().map(|c| c.count).collect();
-        log(format!("check {} {counts:?}", cx.path()));
+        log(format!("check {} {counts:?}", check_context.path()));
     }
 }
 
 impl Test for BasicTest {
-    fn setup(cx: &mut SetupContext) -> Result<BasicConfig, TestError> {
+    fn setup(setup_context: &mut SetupContext) -> Result<BasicConfig, TestError> {
         Ok(BasicConfig {
             env: EnvConfig {
                 clk: Signals::clock(&ScopeLess, "clk")?,
-                counters: cx.get_or("counters", 2)?,
+                counters: setup_context.get_or("counters", 2)?,
                 broken: false,
             },
-            cycles: cx.get_or("cycles", 3)?,
+            cycles: setup_context.get_or("cycles", 3)?,
             deref_in_run: false,
             errors: 0,
         })

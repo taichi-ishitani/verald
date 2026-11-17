@@ -42,8 +42,10 @@ pub trait Component: Sized + 'static {
     /// The role it plays.
     const KIND: Kind = Kind::Component;
 
-    /// A passive component has no run task: it is never borrowed during the
-    /// run phase, so analysis ports can write to it meanwhile.
+    /// A passive component has no `run` and no run task: it is never
+    /// borrowed during the run phase, so analysis ports write to it and
+    /// other tasks `borrow()` it meanwhile. `#[component(.., passive)]` on
+    /// the impl sets it, and requires it of a component with no `run`.
     const PASSIVE: bool = false;
 
     /// Makes the component and its children.
@@ -51,41 +53,71 @@ pub trait Component: Sized + 'static {
 
     /// The run phase: every component's `run` runs concurrently; the test's
     /// ends the phase. An `Err` is a fatal error.
-    async fn run(&mut self, _context: &mut RunContext) -> Result<(), TestError> {
+    async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
         Ok(())
     }
 
     /// Checks what the run left, after every task has been dropped; errors
     /// go to `context`. Children are checked before their parent.
-    fn check(&mut self, _context: &mut CheckContext) {}
+    fn check(&mut self, _check_context: &mut CheckContext) {}
 
     /// Summarizes, after `check`; children before their parent.
-    fn report(&self, _context: &ReportContext) {}
+    fn report(&self, _report_context: &ReportContext) {}
+
+    /// Told of the component's place once it is stored (a sequencer keeps
+    /// it to start its default sequence).
+    #[doc(hidden)]
+    fn __attach(_this: &Rc<RefCell<Self>>) {}
+
+    /// A task the component starts at the beginning of the run phase apart
+    /// from its `run` (a sequencer's default sequence).
+    #[doc(hidden)]
+    fn __default_task(&mut self) -> Option<TaskFuture> {
+        None
+    }
+
+    /// The handles of the component still unbound, by field name.
+    #[doc(hidden)]
+    fn __unbound(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
 }
+
+/// A task as the framework spawns it.
+#[doc(hidden)]
+pub type TaskFuture = Pin<Box<dyn Future<Output = Result<(), TestError>>>>;
 
 /// The dyn-compatible twin of `Component`, through which the framework
 /// reaches every component of the tree.
 pub(crate) trait ErasedComponent {
     fn run<'a>(
         &'a mut self,
-        context: &'a mut RunContext,
+        run_context: &'a mut RunContext,
     ) -> Pin<Box<dyn Future<Output = Result<(), TestError>> + 'a>>;
-    fn check(&mut self, context: &mut CheckContext);
-    fn report(&self, context: &ReportContext);
+    fn check(&mut self, check_context: &mut CheckContext);
+    fn report(&self, report_context: &ReportContext);
+    fn default_task(&mut self) -> Option<TaskFuture>;
+    fn unbound(&self) -> Vec<&'static str>;
 }
 
 impl<T: Component> ErasedComponent for T {
     fn run<'a>(
         &'a mut self,
-        context: &'a mut RunContext,
+        run_context: &'a mut RunContext,
     ) -> Pin<Box<dyn Future<Output = Result<(), TestError>> + 'a>> {
-        Box::pin(Component::run(self, context))
+        Box::pin(Component::run(self, run_context))
     }
-    fn check(&mut self, context: &mut CheckContext) {
-        Component::check(self, context)
+    fn check(&mut self, check_context: &mut CheckContext) {
+        Component::check(self, check_context)
     }
-    fn report(&self, context: &ReportContext) {
-        Component::report(self, context)
+    fn report(&self, report_context: &ReportContext) {
+        Component::report(self, report_context)
+    }
+    fn default_task(&mut self) -> Option<TaskFuture> {
+        Component::__default_task(self)
+    }
+    fn unbound(&self) -> Vec<&'static str> {
+        Component::__unbound(self)
     }
 }
 
@@ -117,6 +149,7 @@ pub(crate) struct Node {
     pub(crate) path: Rc<str>,
     pub(crate) kind: Kind,
     pub(crate) passive: bool,
+
     pub(crate) component: Rc<RefCell<dyn ErasedComponent>>,
     pub(crate) children: Vec<Node>,
 }
@@ -167,6 +200,10 @@ pub struct Instance<T> {
 }
 
 impl<T> Instance<T> {
+    pub(crate) fn rc(&self) -> &Rc<RefCell<T>> {
+        &self.component
+    }
+
     /// The component's path in the hierarchy (`env.agent.driver`).
     pub fn path(&self) -> &str {
         &self.path
@@ -315,6 +352,7 @@ impl Scope {
             }
         })?;
         let component = Rc::new(RefCell::new(built));
+        T::__attach(&component);
         let erased: Rc<RefCell<dyn ErasedComponent>> = component.clone();
         self.children.borrow_mut().push(Node {
             path: path.clone(),
