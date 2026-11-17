@@ -763,26 +763,51 @@ InitThenTraffic::new(10).start(&self.vseqr).await?;
 ### Default sequence
 
 Decided: as in UVM and OVM, a sequencer runs a default sequence in the run
-phase when one is set. It is set typed, through the sequencer's handle,
-before the run phase:
+phase when one is set, through its configuration or through its handle:
 
 ```rust
-// a spec's post_build, through the handle the env keeps
+// the VIP: the configuration carries one, the sequencer names the field
+pub struct ApbConfig {
+    pub default_sequence: DefaultSequence<ApbSequencer>,
+    ..
+}
+
+#[component(sequencer(item = ApbItem, default_sequence = default_sequence))]
+pub struct ApbSequencer {
+    #[context]
+    context: ApbContext,
+}
+
+// a test's setup or a spec's pre_build, before the build
+config.env.apb.default_sequence = DefaultSequence::new(|| RandomWrites::new(10));
+
+// or a spec's post_build, through the handle the env keeps
 test.env.apb.set_default_sequence(|| RandomWrites::new(10));
 ```
 
-- The function's sequence must run on that sequencer's type, so another
-  does not compile. One value: the last set wins.
+- Both are typed: the sequence must run on that sequencer's type, so
+  another does not compile.
+- `DefaultSequence<S>` holds how to make the sequence, or nothing
+  (`Default`). The sequencer takes it from its configuration (through its
+  `#[context]`) when it is made; the handle's `set_default_sequence` after
+  that replaces it. So the later wins: the VIP's default (in its
+  configuration's `Default`, as a slave's responder), then the test's
+  configuration, then a handle in `post_build`. One sequence runs, as in
+  UVM, where the last setting of `default_sequence` wins.
+- Sequencers sharing a configuration each make their own sequence: the
+  function is `Fn` and is called per sequencer.
 - The framework calls the function when the run phase starts and starts
   the sequence on the sequencer, as a task of its own; a sequencer's author
-  writes nothing for it.
-- For now it is set through the handle only; setting it in the sequencer's
-  configuration before the build (a `DefaultSequence<S>` field) is to come.
+  writes the field and the attribute's `default_sequence = field` only.
 - A default sequence runs in the background: the run phase ends with the
-  test's `run`, not with it, and it is dropped with the other `run`s. It
-  suits traffic that only accompanies the scenario (idle traffic, a
-  responder). UVM 1.2's automatic phase objection is not needed: a sequence
-  the test waits for is started from the test's `run`.
+  test's `run` (its `post_run`), not with it, and it is dropped with the
+  other `run`s. It suits traffic that only accompanies the scenario (idle
+  traffic, a responder). UVM 1.2's automatic phase objection is not
+  needed: a sequence the test waits for is started from the test's `run`.
+- There is one default sequence per sequencer, for the run phase: UVM's
+  per-phase default sequences (`main_phase`, ..) have no counterpart, since
+  the test's run is split into `pre_run` / `run` / `post_run` with
+  scenarios instead.
 - A default sequence that returns `Err` is a fatal error, as any `run`.
 - Sequences started explicitly (from the test's `run`, for example) run
   alongside it and share the sequencer's arbitration.

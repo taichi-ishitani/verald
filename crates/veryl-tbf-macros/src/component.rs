@@ -58,6 +58,8 @@ struct SequencerArgs {
     item: Type,
     response: Option<Type>,
     request: Option<Type>,
+    /// The configuration's field holding a `DefaultSequence`.
+    default_sequence: Option<Ident>,
 }
 
 struct AgentArgs {
@@ -95,6 +97,7 @@ impl Parse for Args {
                     let mut item = None;
                     let mut response = None;
                     let mut request = None;
+                    let mut default_sequence = None;
                     list.parse_nested_meta(|nested| {
                         if nested.path.is_ident("item") {
                             item = Some(nested.value()?.parse::<Type>()?);
@@ -102,9 +105,13 @@ impl Parse for Args {
                             response = Some(nested.value()?.parse::<Type>()?);
                         } else if nested.path.is_ident("request") {
                             request = Some(nested.value()?.parse::<Type>()?);
+                        } else if nested.path.is_ident("default_sequence") {
+                            default_sequence = Some(nested.value()?.parse::<Ident>()?);
                         } else {
-                            return Err(nested
-                                .error("expected `item = ..`, `response = ..` or `request = ..`"));
+                            return Err(nested.error(
+                                "expected `item = ..`, `response = ..`, `request = ..` \
+                                 or `default_sequence = ..`",
+                            ));
                         }
                         Ok(())
                     })?;
@@ -115,6 +122,7 @@ impl Parse for Args {
                         item,
                         response,
                         request,
+                        default_sequence,
                     });
                 }
                 Meta::List(list) if list.path.is_ident("agent") => {
@@ -531,7 +539,18 @@ fn sequencer_struct(
         item: req,
         response,
         request,
+        default_sequence,
     } = args;
+    // The default sequence its configuration carries, read through its
+    // `#[context]`.
+    let default = match &default_sequence {
+        Some(field) => quote! {
+            ::core::option::Option::Some(
+                #core::HasContext::context(&*this.borrow()).config().#field.clone(),
+            )
+        },
+        None => quote!(::core::option::Option::None),
+    };
     let rsp = response.map_or(quote!(#req), |r| quote!(#r));
     let Fields::Named(fields) = &mut item.fields else {
         return Err(syn::Error::new(
@@ -618,6 +637,13 @@ fn sequencer_struct(
                     __tbf_sequencer: ::core::default::Default::default(),
                     #request_init
                 })
+            }
+
+            fn __attach(
+                this: &::std::rc::Rc<::core::cell::RefCell<Self>>,
+                path: &::std::rc::Rc<str>,
+            ) {
+                #core::__private::attach_sequencer(this, path, #default);
             }
 
             fn __default_task(&mut self) -> ::core::option::Option<#core::__private::TaskFuture> {

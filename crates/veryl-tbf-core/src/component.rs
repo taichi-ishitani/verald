@@ -66,10 +66,10 @@ pub trait Component: Sized + 'static {
     /// Summarizes, after `check`; children before their parent.
     fn report(&self, _report_context: &ReportContext) {}
 
-    /// Told of the component's place once it is stored (a sequencer keeps
-    /// it to start its default sequence).
+    /// Told of the component's place once it is stored: a sequencer takes
+    /// its name, and its default sequence from its configuration.
     #[doc(hidden)]
-    fn __attach(_this: &Rc<RefCell<Self>>) {}
+    fn __attach(_this: &Rc<RefCell<Self>>, _path: &Rc<str>) {}
 
     /// A task the component starts at the beginning of the run phase apart
     /// from its `run` (a sequencer's default sequence).
@@ -370,7 +370,7 @@ impl Scope {
             }
         })?;
         let component = Rc::new(RefCell::new(built));
-        T::__attach(&component);
+        T::__attach(&component, &path);
         let erased: Rc<RefCell<dyn ErasedComponent>> = component.clone();
         self.children.borrow_mut().push(Node {
             path: path.clone(),

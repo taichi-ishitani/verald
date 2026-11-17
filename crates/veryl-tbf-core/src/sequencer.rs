@@ -390,6 +390,65 @@ pub trait Sequencer: Sized + 'static {
     fn __core(&self) -> &SequencerCore<Self::Item, Self::Response>;
 }
 
+/// The default sequence a configuration carries for a sequencer of type
+/// `S`: none (`Default`), or how to make one. The sequencer names the field
+/// (`#[component(sequencer(item = T, default_sequence = field))]`) and
+/// takes it when it is made; a handle's `set_default_sequence` after that
+/// replaces it. Clones share the function, so sequencers sharing a
+/// configuration each make their own sequence.
+pub struct DefaultSequence<S: Sequencer> {
+    make: Option<Rc<dyn Fn(SequencerHandle<S>) -> TaskFuture>>,
+}
+
+impl<S: Sequencer> Default for DefaultSequence<S> {
+    fn default() -> Self {
+        DefaultSequence { make: None }
+    }
+}
+
+impl<S: Sequencer> Clone for DefaultSequence<S> {
+    fn clone(&self) -> Self {
+        DefaultSequence {
+            make: self.make.clone(),
+        }
+    }
+}
+
+impl<S: Sequencer> DefaultSequence<S> {
+    /// A default sequence made by `make` when the run phase starts.
+    pub fn new<Q>(make: impl Fn() -> Q + 'static) -> Self
+    where
+        Q: SequenceCore<Sequencer = S> + 'static,
+    {
+        DefaultSequence {
+            make: Some(Rc::new(move |handle: SequencerHandle<S>| {
+                let mut sequence = make();
+                Box::pin(async move { sequence.start(&handle).await })
+            })),
+        }
+    }
+
+    pub fn is_set(&self) -> bool {
+        self.make.is_some()
+    }
+}
+
+/// What a generated sequencer does once stored: takes its path as its name
+/// and, if its configuration carries one, its default sequence.
+#[doc(hidden)]
+pub fn attach_sequencer<S: Sequencer>(
+    this: &Rc<RefCell<S>>,
+    path: &Rc<str>,
+    default: Option<DefaultSequence<S>>,
+) {
+    let handle = SequencerHandle::new(this.clone());
+    handle.core().set_name(path.clone());
+    if let Some(make) = default.and_then(|d| d.make) {
+        let bound = handle.clone();
+        handle.core().set_default(Box::new(move || make(bound)));
+    }
+}
+
 impl<S: Sequencer> crate::component::Instance<S> {
     /// A handle to the sequencer, for sequences to start on and for its
     /// driver's port to connect to.
