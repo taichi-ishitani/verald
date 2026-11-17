@@ -3,7 +3,7 @@
 A UVM-style verification framework in Rust for Veryl. This file records the
 decisions made so far, the reasons behind them, and what is still open.
 
-Status: design in progress; nothing is implemented.
+Status: design in progress; the runtime's core is implemented (step 1).
 
 - [Principles](#principles)
 - [Simulator interface](#simulator-interface)
@@ -998,9 +998,11 @@ work):
 - In a method, writes are held until the component's next hook (so they
   reach the design after the next edge), and reads return the value of the
   last edge the component saw (at time 0, the value when the port was bound).
-- During `rst.assert(N)`, every edge calls `on_reset` and none calls
-  `on_clock`; the release calls no hook. An asynchronous reset made inside
-  the design calls `on_reset` once when asserted, and `on_clock` goes on.
+- `on_clock` and `on_reset` are exclusive: while a reset is asserted, every
+  edge calls `on_reset` and none calls `on_clock`, whatever drives the
+  reset; the release calls no hook. (Whether a flip-flop resets
+  synchronously or asynchronously is the flip-flop's matter, not the
+  hooks'.)
 - `finish` and `fail` take effect at the end of the current cycle (`fail`
   from a method at once). `on_finish` is always called, and does not say why
   the simulation ended.
@@ -1022,22 +1024,22 @@ Decided:
   returns at once, which matters since it is called at every edge. Every
   hook that polls (`start`, `on_clock`, `on_reset`) ends the run phase once
   its ready queue is empty if the test's `run` has returned.
-- Resets are tracked as a level, the same way whatever their kind: an
-  `on_reset` sets it asserted, and each `on_clock` reads the reset port.
-  When the level changes, the tasks waiting for assertion or release are
-  woken. This sees the release of `rst.assert()` (at the next `on_clock`),
-  of an asynchronous reset made in the design, and a synchronous one (which
-  calls no `on_reset`). During `rst.assert()` no `on_clock` comes, so tasks
-  waiting for clock edges do not wake: the clock stops in reset, as Veryl
-  models it.
+- Resets are tracked from the hooks: an `on_reset` sets the reset
+  asserted, and the next `on_clock` sets it released, since the two hooks
+  are exclusive and every edge in reset calls `on_reset`. No reset port is
+  read, so no polarity is needed. The tasks waiting for assertion or
+  release are woken when the state changes. In reset no `on_clock` comes,
+  so tasks waiting for clock edges do not wake: the clock stops in reset,
+  as Veryl models it. (Confirmed against the simulator by
+  `examples/hooks`: no `on_clock` comes in reset, and the release is seen
+  at the first `on_clock` after it.)
 
   A driver initializes its outputs on a reset from its `run`: it waits for
   the assertion (`run_with_reset` runs its work until a reset, then an
   `on_reset` handler, then the work again) and drives the
   idle values at once with the clocking block's `drive` (not at the next
-  edge); they reach the design when the hook ends: at the assertion for an
-  asynchronous reset made in the design, after the first reset edge for
-  `rst.assert()`.
+  edge); they reach the design when the hook ends, after the first edge in
+  reset.
 - At the end of the run phase, within the same hook: drop the remaining
   tasks, run `check` and `report`, then `finish` or `fail` the Veryl test
   (it stops at the end of the cycle).
@@ -1388,6 +1390,12 @@ framework:
   value at a time. (Veryl already takes a component's interface from Rust,
   through its manifest of ports, parameters and methods; no types travel
   either way.)
+
+- A hook on reset release (`on_reset_release`, the pair of `on_reset`).
+  Today a release calls no hook and is seen only at the next `on_clock`.
+  With the hook, a release would be known when it happens, values to drive
+  at the release could be written then, rather than at the first edge
+  after it.
 
 - `%m`, the hierarchical name of the current scope, as a
   format specifier, as in SystemVerilog. A setting given per instance is

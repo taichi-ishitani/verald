@@ -1,0 +1,11 @@
+[package]
+name = "veryl-tbf"
+description = "A UVM-style verification framework in Rust for Veryl."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+veryl-tbf-runtime.workspace = true

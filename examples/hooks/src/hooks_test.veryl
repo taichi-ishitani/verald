@@ -1,0 +1,19 @@
+/// Checks how Veryl's simulator calls the testbench's hooks around a reset:
+/// `on_reset` at every edge in reset, no `on_clock` meanwhile, and the
+/// release seen at the first `on_clock` after it.
+#[test(hooks_test)]
+module hooks_test {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (clk);
+    inst tb : $comp::tbf_hooks;
+
+    initial {
+        tb.set_clock("clk", clk);
+        tb.set_reset("rst", rst);
+        tb.option("timeout", 100000);
+        tb.start("hooks");
+        rst.assert(clk);
+        clk.next(1000);
+        $finish();
+    }
+}

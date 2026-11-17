@@ -1,0 +1,11 @@
+[package]
+name = "veryl-tbf-runtime"
+description = "The executor and simulator interface of veryl-tbf."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+veryl-component.workspace = true

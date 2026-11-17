@@ -2,7 +2,8 @@
 
 veryl-tbf is a UVM-style verification framework in Rust for Veryl. The design
 is recorded in [docs/design.md](docs/design.md); read it before working on the
-framework. Nothing is implemented yet.
+framework. Implementation proceeds step by step (the runtime's core first);
+`examples/` holds Veryl projects run with `veryl +local test`.
 
 ## How to work
 
@@ -18,8 +19,7 @@ framework. Nothing is implemented yet.
 - Commit and push only when asked.
 - Commit messages are one line.
 - Fix a pull request by amending its commit.
-- For now, changes are stacked onto the single existing commit with
-  `git commit --amend --no-edit`, until the user says otherwise.
+- Make a new commit for each piece of work unless told to amend.
 
 ## Building and testing
 
