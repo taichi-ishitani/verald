@@ -1489,6 +1489,14 @@ stops short for now:
   reachable with `borrow()` from the test's `run`). The generated
   components (a sequencer, an agent) are passive by the macro. An impl
   without the attribute is given a task, to be safe.
+- For now the unbound-handle check covers the `SequencerHandle` fields of
+  generated sequencers only. Handles in other components (a test's, an
+  env's), the elements of a `Vec<SequencerHandle<T>>`, and a driver's
+  `SeqItemPort` are not checked before the run phase; a missing connection
+  still stops the test, with a message, when it is used (a sequence
+  started on an unbound handle, `get_next_item` on an unconnected port).
+  Widening the check (the attribute on every component's struct generating
+  it from the fields' types) is left until it is wanted.
 - Seeds are kept by `SeedSource` of the random crate: a SplitMix64
   generator shared by its clones. One is made for every component (in
   `Scope::create_instance`, before its `build`) and for every sequence (in
