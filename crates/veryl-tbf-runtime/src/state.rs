@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use veryl_component::{ModportRef, Value};
+use veryl_component::{InputPort, ModportRef, OutputPort, Value};
 
 use crate::TestError;
 use crate::executor::TaskId;
@@ -44,6 +44,8 @@ pub(crate) struct State {
     pub(crate) clocks: Vec<ClockState>,
     pub(crate) resets: Vec<ResetState>,
     pub(crate) interfaces: Vec<(String, ModportRef)>,
+    pub(crate) inputs: Vec<(String, InputPort)>,
+    pub(crate) outputs: Vec<(String, OutputPort)>,
     pub(crate) settings: Vec<Setting>,
     /// The time the run phase must end by.
     pub(crate) timeout: Option<u64>,
@@ -63,6 +65,8 @@ impl State {
             clocks: Vec::new(),
             resets: Vec::new(),
             interfaces: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
             settings: Vec::new(),
             timeout: None,
             main: None,
@@ -78,6 +82,8 @@ impl State {
         self.clocks.iter().any(|c| c.name == name)
             || self.resets.iter().any(|r| r.name == name)
             || self.interfaces.iter().any(|(n, _)| n == name)
+            || self.inputs.iter().any(|(n, _)| n == name)
+            || self.outputs.iter().any(|(n, _)| n == name)
     }
 }
 

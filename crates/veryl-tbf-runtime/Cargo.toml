@@ -8,4 +8,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+num-bigint = "0.5"
+smallvec = "1.15"
 veryl-component.workspace = true
+veryl-tbf-macros.workspace = true

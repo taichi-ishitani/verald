@@ -11,6 +11,7 @@ repository = "https://github.com/taichi-ishitani/veryl-tbf"
 publish = false
 
 [workspace.dependencies]
+veryl-tbf-macros = { path = "crates/veryl-tbf-macros" }
 veryl-tbf-runtime = { path = "crates/veryl-tbf-runtime" }
 # Method reference arguments are not released yet (veryl-lang/veryl#3701).
 veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/component-method-ref-args" }

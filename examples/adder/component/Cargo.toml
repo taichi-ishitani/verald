@@ -1,0 +1,17 @@
+[package]
+name = "adder_tb"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+veryl-tbf-runtime = { path = "../../../crates/veryl-tbf-runtime" }
+# The component derives refer to `::veryl_component`; the same revision as
+# the runtime's.
+veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/component-method-ref-args" }
+
+# Standalone package.
+[workspace]

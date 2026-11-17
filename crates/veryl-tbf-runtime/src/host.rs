@@ -21,7 +21,9 @@
 use std::future::Future;
 use std::rc::Rc;
 
-use veryl_component::{ClockPort, MemberPort, ModportRef, ResetPort, SimCtx, Value, bail};
+use veryl_component::{
+    ClockPort, InputPort, MemberPort, ModportRef, OutputPort, ResetPort, SimCtx, Value, bail,
+};
 
 use crate::TestError;
 use crate::executor::{self, Polled};
@@ -77,13 +79,19 @@ impl Start {
 
     /// The interface registered as `name`.
     pub fn interface(&self, name: &str) -> Result<ModportRef, TestError> {
-        with_state(|s| {
-            s.interfaces
-                .iter()
-                .find(|(n, _)| n == name)
-                .map(|(_, bus)| bus.clone())
-        })
-        .ok_or_else(|| TestError::new(format!("no interface is registered as `{name}`")))
+        registered_interface(name)
+    }
+
+    /// The signal the testbench reads at `path`: one registered with
+    /// `set_input`, or a member of an interface (`"bus.done"`).
+    pub fn input(&self, path: &str) -> Result<InputPort, TestError> {
+        registered_input(path)
+    }
+
+    /// The signal the testbench drives at `path`: one registered with
+    /// `set_output`, or a member of an interface (`"bus.start"`).
+    pub fn output(&self, path: &str) -> Result<OutputPort, TestError> {
+        registered_output(path)
     }
 
     /// The setting the test module gave as `key` (`tb.set(key, value)`),
@@ -123,6 +131,66 @@ impl Start {
     pub fn on_end(&mut self, handler: impl FnOnce(&RunEnd) -> Result<(), TestError> + 'static) {
         let handler: EndHandler = Box::new(handler);
         with_state(|s| s.on_end = Some(handler));
+    }
+}
+
+impl crate::clocking::Signals for Start {
+    fn clock(&self, name: &str) -> Result<Clock, TestError> {
+        Start::clock(self, name)
+    }
+    fn interface(&self, name: &str) -> Result<ModportRef, TestError> {
+        registered_interface(name)
+    }
+    fn input(&self, path: &str) -> Result<InputPort, TestError> {
+        registered_input(path)
+    }
+    fn output(&self, path: &str) -> Result<OutputPort, TestError> {
+        registered_output(path)
+    }
+}
+
+/// The interface registered as `name`.
+pub fn registered_interface(name: &str) -> Result<ModportRef, TestError> {
+    with_state(|s| {
+        s.interfaces
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, bus)| bus.clone())
+    })
+    .ok_or_else(|| TestError::new(format!("no interface is registered as `{name}`")))
+}
+
+/// The interface and member a dotted path names: `bus.done`.
+fn member_path(path: &str) -> Option<(ModportRef, &str)> {
+    let (interface, member) = path.rsplit_once('.')?;
+    Some((registered_interface(interface).ok()?, member))
+}
+
+/// The signal the testbench reads at `path`: one registered with
+/// `set_input`, or a member of an interface (`"bus.done"`).
+pub fn registered_input(path: &str) -> Result<InputPort, TestError> {
+    if let Some(port) = with_state(|s| s.inputs.iter().find(|(n, _)| n == path).map(|(_, p)| *p)) {
+        return Ok(port);
+    }
+    match member_path(path) {
+        Some((bus, member)) => Ok(bus.input(member)?),
+        None => Err(TestError::new(format!(
+            "no input is registered as `{path}`"
+        ))),
+    }
+}
+
+/// The signal the testbench drives at `path`: one registered with
+/// `set_output`, or a member of an interface (`"bus.start"`).
+pub fn registered_output(path: &str) -> Result<OutputPort, TestError> {
+    if let Some(port) = with_state(|s| s.outputs.iter().find(|(n, _)| n == path).map(|(_, p)| *p)) {
+        return Ok(port);
+    }
+    match member_path(path) {
+        Some((bus, member)) => Ok(bus.output(member)?),
+        None => Err(TestError::new(format!(
+            "no output is registered as `{path}`"
+        ))),
     }
 }
 
@@ -370,6 +438,24 @@ pub fn set_interface(_ctx: &mut SimCtx, name: String, bus: ModportRef) -> HookRe
         }
     }
     with_state(|s| s.interfaces.push((name, bus)));
+    Ok(())
+}
+
+/// `set_input(name, sig)`: registers a signal the testbench reads, outside
+/// any interface (an interrupt).
+pub fn set_input(_ctx: &mut SimCtx, name: String, sig: InputPort) -> HookResult {
+    in_setup("set_input")?;
+    check_name(&name)?;
+    with_state(|s| s.inputs.push((name, sig)));
+    Ok(())
+}
+
+/// `set_output(name, sig)`: registers a signal the testbench drives,
+/// outside any interface.
+pub fn set_output(_ctx: &mut SimCtx, name: String, sig: OutputPort) -> HookResult {
+    in_setup("set_output")?;
+    check_name(&name)?;
+    with_state(|s| s.outputs.push((name, sig)));
     Ok(())
 }
 

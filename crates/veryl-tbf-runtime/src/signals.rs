@@ -213,3 +213,32 @@ impl Future for ResetWait {
         })
     }
 }
+
+/// Runs a driver's or a monitor's work across resets: calls `on_reset`,
+/// waits for the reset to be released, then runs `body` until the reset is
+/// asserted, which drops it, and starts over. Returns only on an error of
+/// `body`.
+///
+/// `body` is the component's whole work: one loop, or several joined, which
+/// a reset then stops all at once, with what they forked. `state` is what
+/// `on_reset` and `body` work on (the clocking blocks, queues and the
+/// component's own state). `on_reset` runs before the first `body` and at
+/// each reset: it drives the bus idle (with the clocking block's `drive`,
+/// reaching the design at the end of the hook) and clears what must not
+/// survive a reset.
+pub async fn run_with_reset<S>(
+    reset: Reset,
+    state: &mut S,
+    mut on_reset: impl FnMut(&mut S),
+    mut body: impl AsyncFnMut(&mut S) -> Result<std::convert::Infallible, crate::TestError>,
+) -> Result<std::convert::Infallible, crate::TestError> {
+    loop {
+        on_reset(state);
+        reset.released().await;
+        match crate::first(body(state), reset.asserted()).await {
+            crate::Either::First(Err(error)) => return Err(error),
+            crate::Either::First(Ok(never)) => match never {},
+            crate::Either::Second(()) => {}
+        }
+    }
+}

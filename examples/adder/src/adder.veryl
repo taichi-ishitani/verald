@@ -1,0 +1,76 @@
+/// Request/response bus of the adder.
+interface adder_if {
+    var start : logic   ;
+    var a     : logic<8>;
+    var b     : logic<8>;
+    var done  : logic   ;
+    var result: logic<9>;
+
+    modport dut {
+        start : input ,
+        a     : input ,
+        b     : input ,
+        done  : output,
+        result: output,
+    }
+
+    modport tb {
+        start : output,
+        a     : output,
+        b     : output,
+        done  : input ,
+        result: input ,
+    }
+}
+
+/// Answers each `start` with the sum of `a` and `b` on the next cycle, and
+/// counts the additions on `o_count`, outside the bus.
+module adder (
+    i_clk  : input   clock           ,
+    i_rst  : input   reset           ,
+    bus    : modport adder_if::dut   ,
+    o_count: output  logic        <8>,
+) {
+    always_ff {
+        if_reset {
+            bus.done   = 0;
+            bus.result = 0;
+            o_count    = 0;
+        } else {
+            bus.done = bus.start;
+            if bus.start {
+                bus.result = bus.a + bus.b;
+                o_count    = o_count + 1;
+            }
+        }
+    }
+}
+
+/// Runs the testbench's `adds` test against the adder.
+#[test(adder_test)]
+module adder_test {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+    inst bus: adder_if;
+    var count: logic<8>;
+    inst dut: adder (
+        i_clk  : clk  ,
+        i_rst  : rst  ,
+        bus           ,
+        o_count: count,
+    );
+    inst tb : $comp::tbf_adder;
+
+    initial {
+        tb.set_clock("clk", clk);
+        tb.set_reset("rst", rst);
+        tb.set_interface("bus", bus.tb);
+        tb.set_input("count", count);
+        tb.option("timeout", 100000);
+        tb.set("count", 20);
+        tb.start("adds");
+        rst.assert(clk);
+        clk.next(10000);
+        $finish();
+    }
+}

@@ -3,7 +3,8 @@
 A UVM-style verification framework in Rust for Veryl. This file records the
 decisions made so far, the reasons behind them, and what is still open.
 
-Status: design in progress; the runtime's core is implemented (step 1).
+Status: design in progress; the runtime is implemented: its core (step 1) and
+clocking blocks with `run_with_reset` (step 2).
 
 - [Principles](#principles)
 - [Simulator interface](#simulator-interface)
@@ -895,6 +896,61 @@ Decided:
     (a method on the block) reads all inputs at each edge. The gain is the
     reading and conversion on the Rust side: Veryl's simulator copies a
     component's inputs at every edge it hears regardless.
+
+### Clocking blocks
+
+Decided (implemented in the runtime, the macros in `veryl-tbf-macros`); what
+users see follows rustdv-veryl's clocking blocks:
+
+- A `#[clocking]` struct is a clocking block, as SystemVerilog's
+  `clocking cb @(posedge clk)`. Its fields are `#[input]` (sampled) and
+  `#[output]` (driven) signals, and `#[modport]` fields, structs declaring a
+  modport's members the same way. A signal need not belong to an interface
+  (an interrupt).
+- `Cb::new(signals, clock, CbPaths::default())` binds each field by its name
+  among what the test module registered: an interface (`set_interface`) for
+  a modport field, whose members bind by their names; a signal registered
+  with `set_input` / `set_output`, or an interface's member by a dotted path
+  (`"bus.done"`), for a signal field. The generated `<Name>Paths` struct
+  overrides the path of any field. `signals` is anything implementing
+  `Signals`: `Start` now, the methodology's `Scope` later. `Signals` also
+  gives the short forms `scope.clocking::<Cb>("clk")?` (every field at its
+  own name, the clock by its registered name) and
+  `scope.clocking_with("clk", CbPaths { .. })?` (the block's type following
+  from its paths' type); `new` remains for a clock given as a `Clock`.
+  Widths are checked
+  against the fields' types at construction. Until a Veryl clocking
+  declaration can say which clock a block follows (see [TODO](#todo)), the
+  clock is given here.
+- Field types implement `SignalValue`: `bool`, the unsigned integers up to
+  `u128`, `BigUint` (any width), and `Value` (the bits as they are); every
+  type but `Value` reads X and Z as 0, as SystemVerilog's conversion to
+  two-state types.
+- Fields start at zero. An output is written when it differs from the value
+  last written (zero at first), so an output never assigned is never
+  driven and the design's value stands; `tick` writes the changed outputs
+  before waiting, `drive` writes them at once.
+- An output may declare an initial value, its idle value:
+  `#[output(init = false)] start: bool`, in a clocking block or a modport.
+  The field starts at it, taken as already driven; `cb.init()` assigns
+  every such output its value and drives it at once, whatever was last
+  driven, so a reset brings the bus to idle in one call
+  (`run_with_reset(rst, &mut cb, |cb| cb.init(), ..)`). An output
+  declares it where it is declared: in its modport, or, for a signal of its
+  own, in the clocking block. An output with no initial value has none
+  (it is uninitialized, as an undriven signal is undefined), so `init`
+  leaves it alone.
+- `tick!(cb)`, and the waits `posedge`, `negedge`, `edge`, `changed`,
+  `wait`, `tick_until`, `tick_while`, as methods taking a closure (reading
+  every input at each edge) and as macros (reading only what the condition
+  names while waiting, see above); the `_within` forms of the macros give
+  up after a number of edges with a `ClockingTimeout`, which `?` turns into
+  a fatal error naming the condition.
+- The macros' generated code names the runtime through the crate the user
+  depends on, `veryl-tbf` (as `veryl_tbf::runtime`) or `veryl-tbf-runtime`.
+- `run_with_reset(reset, state, on_reset, body)` is in the runtime: it runs
+  `on_reset`, waits for the release, runs `body` until the next assertion
+  (dropping it, with what it forked), and starts over.
 
 ### Concurrency within a component
 

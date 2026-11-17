@@ -9,6 +9,7 @@
 
 #![allow(async_fn_in_trait)]
 
+pub mod clocking;
 mod concurrency;
 mod error;
 mod executor;
@@ -18,20 +19,30 @@ pub mod sim;
 mod state;
 mod sync;
 
+pub use clocking::{Clocking, ClockingPaths, ClockingTimeout, SignalValue, Signals};
 pub use concurrency::{Either, Scope, first, fork_scope, join, try_join};
 pub use error::TestError;
 pub use host::{Start, Testbench};
-pub use signals::{Clock, Edges, Reset, ResetWait};
+pub use signals::{Clock, Edges, Reset, ResetWait, run_with_reset};
 pub use state::RunEnd;
 pub use sync::{Event, Fifo};
+pub use veryl_tbf_macros::{
+    changed, changed_within, clocking, edge, edge_within, modport, negedge, negedge_within,
+    posedge, posedge_within, tick_until, tick_until_within, tick_while, tick_while_within,
+};
 
 /// The names a testbench usually needs.
 pub mod prelude {
     pub use crate::{
-        Clock, Either, Event, Fifo, Reset, Scope, Start, TestError, Testbench, first, fork_scope,
-        join, try_join,
+        Clock, Clocking, ClockingPaths, ClockingTimeout, Either, Event, Fifo, Reset, Scope,
+        SignalValue, Signals, Start, TestError, Testbench, changed, changed_within, clocking, edge,
+        edge_within, first, fork_scope, join, modport, negedge, negedge_within, posedge,
+        posedge_within, run_with_reset, tick, tick_until, tick_until_within, tick_while,
+        tick_while_within, try_join,
     };
 }
+
+pub use num_bigint::BigUint;
 
 #[doc(hidden)]
 pub mod __private {
@@ -114,6 +125,26 @@ macro_rules! component {
                 bus: ::veryl_component::ModportRef,
             ) -> ::veryl_component::Result<()> {
                 $crate::host::set_interface(ctx, name, bus)
+            }
+
+            /// Registers a signal the testbench reads under `name`.
+            fn set_input(
+                &mut self,
+                ctx: &mut ::veryl_component::SimCtx,
+                name: ::std::string::String,
+                sig: ::veryl_component::InputPort,
+            ) -> ::veryl_component::Result<()> {
+                $crate::host::set_input(ctx, name, sig)
+            }
+
+            /// Registers a signal the testbench drives under `name`.
+            fn set_output(
+                &mut self,
+                ctx: &mut ::veryl_component::SimCtx,
+                name: ::std::string::String,
+                sig: ::veryl_component::OutputPort,
+            ) -> ::veryl_component::Result<()> {
+                $crate::host::set_output(ctx, name, sig)
             }
 
             /// Gives an option of the framework, checked at once.
