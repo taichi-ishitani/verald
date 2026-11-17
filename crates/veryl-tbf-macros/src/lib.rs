@@ -5,6 +5,7 @@
 //! on: `veryl-tbf` (as `veryl_tbf::runtime`) or `veryl-tbf-runtime`.
 
 mod clocking;
+mod test;
 
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
@@ -29,6 +30,34 @@ pub(crate) fn runtime() -> TokenStream2 {
         // The runtime's own tests and examples.
         _ => quote!(::veryl_tbf_runtime),
     }
+}
+
+/// The path of the methodology crate as the calling crate reaches it.
+pub(crate) fn core() -> TokenStream2 {
+    if let Ok(found) = crate_name("veryl-tbf") {
+        let name = match found {
+            FoundCrate::Itself => Ident::new("veryl_tbf", Span::call_site()),
+            FoundCrate::Name(name) => Ident::new(&name, Span::call_site()),
+        };
+        return quote!(::#name::core);
+    }
+    match crate_name("veryl-tbf-core") {
+        Ok(FoundCrate::Name(name)) => {
+            let name = Ident::new(&name, Span::call_site());
+            quote!(::#name)
+        }
+        _ => quote!(::veryl_tbf_core),
+    }
+}
+
+/// Registers a test, which the test module starts by name
+/// (`tb.start("SlowWriteTest")`): `register_test!(RegTest)` registers the
+/// test type under its own name with no spec; `register_test!(SlowWriteTest,
+/// RegTest, SlowWrites)` registers a test type with a spec (one spec, or a
+/// `BundledSpecs`) under a name of its own.
+#[proc_macro]
+pub fn register_test(input: TokenStream) -> TokenStream {
+    expand(test::register_test(input.into()))
 }
 
 fn expand(r: syn::Result<TokenStream2>) -> TokenStream {

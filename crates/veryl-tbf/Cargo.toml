@@ -9,3 +9,4 @@ publish.workspace = true
 
 [dependencies]
 veryl-tbf-runtime.workspace = true
+veryl-tbf-core.workspace = true

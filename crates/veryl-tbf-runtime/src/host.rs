@@ -43,9 +43,19 @@ pub trait Testbench: 'static {
         Ok(false)
     }
 
+    /// The options `option` takes, each with what it is, for the error on
+    /// an unknown one.
+    fn options() -> Vec<String> {
+        Vec::new()
+    }
+
     /// Starts the test named by the test module (`tb.start(name)`): spawns
     /// its tasks and sets the main task, whose end ends the run phase.
     fn start(start: &mut Start) -> Result<(), TestError>;
+
+    /// Called at the start of each simulation (`on_init`), before any
+    /// option: a fresh state for the testbench's own thread-local data.
+    fn init() {}
 }
 
 /// The options the runtime takes itself.
@@ -233,23 +243,29 @@ fn run() {
     if with_state(|s| s.phase) != Phase::Running {
         return;
     }
-    let polled = executor::run_ready(|id| {
-        with_state(|s| {
-            if s.main == Some(id) {
-                s.main_done = true;
-            }
-        })
-    });
-    match polled {
-        Polled::Fatal { owner, error } => end(RunEnd::Fatal {
+    let polled = executor::run_ready(
+        |id| {
+            with_state(|s| {
+                if s.main == Some(id) {
+                    s.main_done = true;
+                }
+            })
+        },
+        || with_state(|s| s.pending_fatal.is_some()),
+    );
+    let pending = with_state(|s| s.pending_fatal.take());
+    match (polled, pending) {
+        (Polled::Fatal { owner, error }, _) => end(RunEnd::Fatal {
             owner: owner.to_string(),
             error,
         }),
-        Polled::Idle => {
+        (_, Some((owner, error))) => end(RunEnd::Fatal { owner, error }),
+        (Polled::Idle, None) => {
             if with_state(|s| s.main_done) {
                 end(RunEnd::Finished);
             }
         }
+        (Polled::Stopped, None) => unreachable!("stopped with no fatal error"),
     }
 }
 
@@ -301,9 +317,34 @@ fn check_timeout() {
 }
 
 /// `on_init`: a fresh runtime for this simulation.
-pub fn on_init(_ctx: &mut SimCtx) -> HookResult {
+pub fn on_init<T: Testbench>(_ctx: &mut SimCtx) -> HookResult {
     state::init();
+    T::init();
     Ok(())
+}
+
+/// Ends the run phase with a fatal error raised by `owner` outside a task's
+/// return (an error limit reached), once the running task yields.
+pub fn fatal(owner: &str, error: TestError) {
+    with_state(|s| {
+        if s.pending_fatal.is_none() {
+            s.pending_fatal = Some((owner.to_string(), error));
+        }
+    });
+}
+
+/// The clock registered as `name`.
+pub fn registered_clock(name: &str) -> Result<Clock, TestError> {
+    with_state(|s| s.clocks.iter().position(|c| c.name == name))
+        .map(Clock::new)
+        .ok_or_else(|| TestError::new(format!("no clock is registered as `{name}`")))
+}
+
+/// The reset registered as `name`.
+pub fn registered_reset(name: &str) -> Result<Reset, TestError> {
+    with_state(|s| s.resets.iter().position(|r| r.name == name))
+        .map(Reset::new)
+        .ok_or_else(|| TestError::new(format!("no reset is registered as `{name}`")))
 }
 
 /// `on_clock`: counts the edge of the clock that fired, wakes its waiters,
@@ -476,11 +517,9 @@ pub fn option<T: Testbench>(_ctx: &mut SimCtx, key: String, value: Value) -> Hoo
             let known: Vec<String> = RUNTIME_OPTIONS
                 .iter()
                 .map(|(k, desc)| format!("`{k}` ({desc})"))
+                .chain(T::options())
                 .collect();
-            bail!(
-                "unknown option `{key}`; the runtime's: {}",
-                known.join(", ")
-            )
+            bail!("unknown option `{key}`; known: {}", known.join(", "))
         }
         Err(e) => bail!("option `{key}`: {e}"),
     }

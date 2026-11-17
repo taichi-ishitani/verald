@@ -126,12 +126,18 @@ pub(crate) enum Polled {
     Idle,
     /// A task returned `Err`: the run phase is to end at once.
     Fatal { owner: Rc<str>, error: TestError },
+    /// `stop` asked to stop polling.
+    Stopped,
 }
 
 /// Polls ready tasks until the queue is empty or one fails. `on_done` is told
-/// of each task that ends with `Ok`.
-pub(crate) fn run_ready(mut on_done: impl FnMut(TaskId)) -> Polled {
+/// of each task that ends with `Ok`; `stop`, asked after each poll, ends the
+/// polling early.
+pub(crate) fn run_ready(mut on_done: impl FnMut(TaskId), stop: impl Fn() -> bool) -> Polled {
     while let Some(index) = pop_ready() {
+        if stop() {
+            return Polled::Stopped;
+        }
         let taken = TASKS.with(|tasks| {
             let mut tasks = tasks.borrow_mut();
             tasks

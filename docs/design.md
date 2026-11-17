@@ -3,8 +3,10 @@
 A UVM-style verification framework in Rust for Veryl. This file records the
 decisions made so far, the reasons behind them, and what is still open.
 
-Status: design in progress; the runtime is implemented: its core (step 1) and
-clocking blocks with `run_with_reset` (step 2).
+Status: design in progress. Implemented: the runtime's core (step 1),
+clocking blocks with `run_with_reset` (step 2), and the methodology's
+skeleton (step 3: components, phases, tests, specs and the runner). Notes
+marked "for now" record where the implementation stops short of the design.
 
 - [Principles](#principles)
 - [Simulator interface](#simulator-interface)
@@ -17,6 +19,7 @@ clocking blocks with `run_with_reset` (step 2).
 - [Executor](#executor)
 - [Runner](#runner)
 - [Crate layout](#crate-layout)
+- [Implementation notes](#implementation-notes)
 - [Taken from UVM](#taken-from-uvm)
 - [Open questions](#open-questions)
 - [TODO](#todo)
@@ -396,14 +399,13 @@ type, plus a spec applied between and after the two steps.
 
 ```rust
 // framework
-pub trait Test: Component<Context = <Self as Test>::Config> {
-    type Config;
-    /// Makes the configuration (may randomize it).
-    fn setup(cx: &mut SetupContext) -> Result<Self::Config, TestError>;
+pub trait Test: Component {
+    /// Makes the configuration (may randomize it): the test's `Context`.
+    fn setup(cx: &mut SetupContext) -> Result<Self::Context, TestError>;
 }
 
 pub trait Spec<T: Test> {
-    fn pre_build(&self, _config: &mut T::Config) {}   // after setup, before build: settings, callbacks
+    fn pre_build(&self, _config: &mut T::Context) {}  // after setup, before build: settings, callbacks
     fn post_build(&self, _test: &mut T) {}            // after build, before run: typed adjustments
 }
 impl<T: Test> Spec<T> for () {}                                   // no spec
@@ -418,7 +420,6 @@ spec.post_build(&mut test);
 
 // a test: setup and build, no spec in sight
 impl Test for RegTest {
-    type Config = RegTestConfig;
     fn setup(cx: &mut SetupContext) -> Result<RegTestConfig, TestError> {
         Ok(RegTestConfig::new(cx))
     }
@@ -1306,6 +1307,29 @@ What each side holds where they meet:
 
 Static dispatch across the crates is kept with generics and `#[inline]`, so
 the split costs nothing per edge.
+
+## Implementation notes
+
+What the implementation settled where the design left room, and where it
+stops short for now:
+
+- The runtime's fork scope is `ForkScope` (`fork_scope(async |scope| ..)`),
+  apart from the methodology's `Scope`.
+- A component's kind and passiveness are, for now, the constants
+  `Component::KIND` and `Component::PASSIVE`; the `#[component(..)]`
+  attribute (kinds, `passive`, the agent's generation, a test required to
+  have a `run`) comes with step 4. A passive component's `run`, if written,
+  is not run.
+- The test is the root: its path is empty, its children's paths have no
+  prefix (`env.driver`), and messages name it by the name it was registered
+  under. The hierarchy is printed at the debug level when the test starts.
+- `Instance<T>` is not `Clone`, so `DerefMut` through it is unique.
+- Each component's run task borrows the component and yields once before
+  running it, so every component is borrowed before any user code runs.
+- Reaching the error limit asks the runtime to end the run phase
+  (`host::fatal`); it ends once the task that reported the error yields.
+- The report summary does not show the seed yet; seeds come with
+  constrained random (step 5).
 
 ## Taken from UVM
 

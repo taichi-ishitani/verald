@@ -20,7 +20,7 @@ mod state;
 mod sync;
 
 pub use clocking::{Clocking, ClockingPaths, ClockingTimeout, SignalValue, Signals};
-pub use concurrency::{Either, Scope, first, fork_scope, join, try_join};
+pub use concurrency::{Either, ForkScope, first, fork_scope, join, try_join, yield_now};
 pub use error::TestError;
 pub use host::{Start, Testbench};
 pub use signals::{Clock, Edges, Reset, ResetWait, run_with_reset};
@@ -34,7 +34,7 @@ pub use veryl_tbf_macros::{
 /// The names a testbench usually needs.
 pub mod prelude {
     pub use crate::{
-        Clock, Clocking, ClockingPaths, ClockingTimeout, Either, Event, Fifo, Reset, Scope,
+        Clock, Clocking, ClockingPaths, ClockingTimeout, Either, Event, Fifo, ForkScope, Reset,
         SignalValue, Signals, Start, TestError, Testbench, changed, changed_within, clocking, edge,
         edge_within, first, fork_scope, join, modport, negedge, negedge_within, posedge,
         posedge_within, run_with_reset, tick, tick_until, tick_until_within, tick_while,
@@ -73,7 +73,7 @@ macro_rules! component {
                 &mut self,
                 ctx: &mut ::veryl_component::SimCtx,
             ) -> ::veryl_component::Result<()> {
-                $crate::host::on_init(ctx)
+                $crate::host::on_init::<$tb>(ctx)
             }
 
             fn on_clock(

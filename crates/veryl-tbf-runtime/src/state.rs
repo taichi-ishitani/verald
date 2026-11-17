@@ -52,6 +52,9 @@ pub(crate) struct State {
     pub(crate) main: Option<TaskId>,
     pub(crate) main_done: bool,
     pub(crate) on_end: Option<EndHandler>,
+    /// A fatal error raised outside a task's return (`host::fatal`), ending
+    /// the run phase once the running task yields.
+    pub(crate) pending_fatal: Option<(String, TestError)>,
     /// Set on entering a hook and cleared on a normal return: a hook that
     /// finds it set knows the previous one unwound.
     pub(crate) in_hook: bool,
@@ -72,6 +75,7 @@ impl State {
             main: None,
             main_done: false,
             on_end: None,
+            pending_fatal: None,
             in_hook: false,
             poisoned: false,
         }

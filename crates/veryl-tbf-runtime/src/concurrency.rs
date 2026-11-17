@@ -4,13 +4,29 @@
 //! |---------------------|----------------------------------------|
 //! | `fork .. join`      | [`join`], [`try_join`]                 |
 //! | `fork .. join_any`  | [`first`] (the other is dropped)       |
-//! | `fork .. join_none` | [`Scope::fork`] inside a [`fork_scope`] |
+//! | `fork .. join_none` | [`ForkScope::fork`] inside a [`fork_scope`] |
 //! | `disable fork`      | dropping the scope                     |
 
 use std::cell::RefCell;
 use std::future::{Future, poll_fn};
 use std::pin::{Pin, pin};
 use std::task::Poll;
+
+/// Yields once: the task goes to the back of the ready queue and resumes in
+/// the same hook, after the tasks already ready.
+pub async fn yield_now() {
+    let mut yielded = false;
+    poll_fn(|cx| {
+        if yielded {
+            Poll::Ready(())
+        } else {
+            yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
+    .await
+}
 
 /// Runs two futures together; returns both outputs.
 pub async fn join<A: Future, B: Future>(a: A, b: B) -> (A::Output, B::Output) {
@@ -102,13 +118,13 @@ pub async fn first<A: Future, B: Future>(a: A, b: B) -> Either<A::Output, B::Out
 type Forked<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
 
 /// The tasks forked in a [`fork_scope`].
-pub struct Scope<'a> {
+pub struct ForkScope<'a> {
     running: RefCell<Vec<Forked<'a>>>,
     /// Forked since the last poll; moved to `running` by the scope.
     added: RefCell<Vec<Forked<'a>>>,
 }
 
-impl<'a> Scope<'a> {
+impl<'a> ForkScope<'a> {
     /// Starts `task` alongside the scope's body, as SystemVerilog's
     /// `fork .. join_none`: it runs until it ends or the scope is dropped.
     pub fn fork(&self, task: impl Future<Output = ()> + 'a) {
@@ -121,8 +137,8 @@ impl<'a> Scope<'a> {
 /// outlives the scope and need no `'static`. The scope ends when the body
 /// and every forked task have ended; dropping it drops them all (a reset
 /// dropping a driver's work drops what it forked).
-pub async fn fork_scope<'a, R>(body: impl AsyncFnOnce(&Scope<'a>) -> R) -> R {
-    let scope = Scope {
+pub async fn fork_scope<'a, R>(body: impl AsyncFnOnce(&ForkScope<'a>) -> R) -> R {
+    let scope = ForkScope {
         running: RefCell::new(Vec::new()),
         added: RefCell::new(Vec::new()),
     };
