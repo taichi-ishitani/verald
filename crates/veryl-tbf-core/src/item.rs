@@ -62,6 +62,23 @@ fn event_of(slot: &RefCell<Option<Event>>, already: bool) -> Event {
         .clone()
 }
 
+/// `item.into()` where a handle is expected: `port.write(&item.into())`.
+impl<T> From<T> for ItemHandle<T> {
+    fn from(value: T) -> Self {
+        ItemHandle::new(value)
+    }
+}
+
+/// `item.into_handle()`: an item, made, put in a handle (a monitor's, to
+/// publish).
+pub trait IntoHandle: Sized {
+    fn into_handle(self) -> ItemHandle<Self> {
+        ItemHandle::new(self)
+    }
+}
+
+impl<T> IntoHandle for T {}
+
 impl<T> ItemHandle<T> {
     /// Shares `value` as a sent item.
     pub fn new(value: T) -> Self {

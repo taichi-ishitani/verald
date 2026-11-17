@@ -20,8 +20,8 @@ pub use agent::{
 pub use component::{
     CheckContext, Component, Instance, Kind, OptInstance, ReportContext, RunContext, Scope,
 };
-pub use context::{HasContext, InstanceContext, Knob};
-pub use item::ItemHandle;
+pub use context::{HasContext, InstanceContext, IntoContext, Knob};
+pub use item::{IntoHandle, ItemHandle};
 pub use report::Severity;
 pub use sequence::{HasBase, Sequence, SequenceCore};
 pub use sequencer::{
@@ -46,10 +46,10 @@ pub mod prelude {
     pub use crate::{
         AgentConfig, AnalysisExport, AnalysisFifo, AnalysisPort, BundledSpecs, CheckContext,
         Component, DefaultSequence, DriverPort, HasBase, HasContext, Instance, InstanceContext,
-        ItemHandle, ItemWaiter, Kind, Knob, MonitorPort, OptInstance, ReactiveSequence,
-        ReactiveSequencer, ReportContext, RequestPort, RunContext, Scenario, Scope, SeqItemPort,
-        Sequence, SequenceCore, Sequencer, SequencerHandle, SetupContext, Spec, Subscriber, Test,
-        bundled_specs, component, register_test, sequence,
+        IntoContext, IntoHandle, ItemHandle, ItemWaiter, Kind, Knob, MonitorPort, OptInstance,
+        ReactiveSequence, ReactiveSequencer, ReportContext, RequestPort, RunContext, Scenario,
+        Scope, SeqItemPort, Sequence, SequenceCore, Sequencer, SequencerHandle, SetupContext, Spec,
+        Subscriber, Test, bundled_specs, component, register_test, sequence,
     };
 }
 
@@ -60,7 +60,7 @@ pub mod __private {
     pub use crate::context::{ContextParts, DeclaredKind};
     pub use crate::sequence::SequenceFields;
     pub use crate::sequencer::{SequencerCore, attach_sequencer};
-    pub use crate::test::{SpecTarget, TestEntry, start_test};
+    pub use crate::test::{Registrable, SpecTarget, TestEntry, start_test};
     pub use inventory;
     pub use veryl_tbf_runtime::TestError;
 }

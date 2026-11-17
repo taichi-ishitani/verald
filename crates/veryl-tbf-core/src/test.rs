@@ -49,6 +49,15 @@ pub trait Scenario: Default + 'static {
     ) -> Result<(), TestError>;
 }
 
+/// A test that may be registered: one with `#[component(test)]` on its
+/// struct that is not a base test, or one made from a base.
+#[doc(hidden)]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be registered: it is a base test, or has no `#[component(test)]` on its struct",
+    label = "register a test made from it (`#[component(test(base = {Self}, run = ..))]`), or mark its struct"
+)]
+pub trait Registrable {}
+
 /// The test a spec is written for: the test itself, or the root base of a
 /// test made from a base; implemented by `#[component(test..)]` on the
 /// struct, which a registered test needs.
@@ -195,7 +204,7 @@ inventory::collect!(TestEntry);
 /// Builds the test `T` with `spec` and starts its run phase: what a
 /// registered test does when the test module starts it.
 #[doc(hidden)]
-pub fn start_test<T: SpecTarget, S: Spec<T::Target>>(
+pub fn start_test<T: SpecTarget + Registrable, S: Spec<T::Target>>(
     start: &mut Start,
     name: &'static str,
     spec: S,

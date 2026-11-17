@@ -56,30 +56,18 @@ struct BaseTest {
 impl Component for BaseTest {
     type Context = BaseConfig;
 
+    fn setup(_setup_context: &mut SetupContext) -> Result<BaseConfig, TestError> {
+        Ok(BaseConfig {
+            clk: veryl_tbf_runtime::host::registered_clock("clk")?,
+            label: "plain",
+        })
+    }
+
     fn build(scope: &Scope, config: BaseConfig) -> Result<Self, TestError> {
         Ok(BaseTest {
             child: scope.create_instance::<Child>("child", ())?,
             clk: config.clk,
             label: config.label,
-        })
-    }
-
-    async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
-        self.clk.edge().await;
-        log(format!("base run ({})", self.label));
-        Ok(())
-    }
-
-    fn check(&mut self, check_context: &mut CheckContext) {
-        log(format!("check {}", check_context.path()));
-    }
-}
-
-impl Test for BaseTest {
-    fn setup(_setup_context: &mut SetupContext) -> Result<BaseConfig, TestError> {
-        Ok(BaseConfig {
-            clk: veryl_tbf_runtime::host::registered_clock("clk")?,
-            label: "plain",
         })
     }
 
@@ -89,10 +77,20 @@ impl Test for BaseTest {
         Ok(())
     }
 
+    async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
+        self.clk.edge().await;
+        log(format!("base run ({})", self.label));
+        Ok(())
+    }
+
     async fn post_run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
         self.clk.edge().await;
         log("base post_run");
         Ok(())
+    }
+
+    fn check(&mut self, check_context: &mut CheckContext) {
+        log(format!("check {}", check_context.path()));
     }
 }
 
@@ -162,7 +160,25 @@ struct LayeredTest {
     extra: u32,
 }
 
+/// Its own `run` and `post_run`, as methods; the latter calls the base's.
+#[component(test(base = BaseTest, run, post_run))]
+struct OwnStepsTest {}
+
+impl OwnStepsTest {
+    async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
+        self.clk.edge().await;
+        log(format!("own run ({})", self.label));
+        Ok(())
+    }
+
+    async fn post_run(&mut self, run_context: &mut RunContext) -> Result<(), TestError> {
+        log("own post_run");
+        Test::post_run(&mut self.base, run_context).await
+    }
+}
+
 register_test!(BaseTest);
+register_test!(OwnStepsTest);
 register_test!(BodyTest);
 register_test!(LabelledBody, BodyTest, Labelled);
 register_test!(LayeredTest);
@@ -244,6 +260,21 @@ fn a_test_made_from_a_base_may_be_a_base() {
             "base post_run",
             "check child",
             "check LayeredTest",
+        ]
+    );
+}
+
+#[test]
+fn a_test_made_from_a_base_may_write_its_steps_as_methods() {
+    assert_eq!(
+        run("OwnStepsTest"),
+        [
+            "base pre_run",
+            "own run (plain)",
+            "own post_run",
+            "base post_run",
+            "check child",
+            "check OwnStepsTest",
         ]
     );
 }

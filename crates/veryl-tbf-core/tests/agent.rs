@@ -70,7 +70,7 @@ impl Component for TxMonitor {
             clk.edge().await;
             n += 1;
             self.requests.write(&n);
-            self.port.write(&ItemHandle::new(Tx { addr: n }));
+            self.port.write(&Tx { addr: n }.into());
         }
     }
 }
@@ -157,10 +157,8 @@ impl Component for AgentTest {
     type Context = Clock;
 
     fn build(scope: &Scope, clk: Clock) -> Result<Self, TestError> {
-        let active = scope.create_instance::<TxAgent>(
-            "active",
-            InstanceContext::new(Config { clk, active: true }),
-        )?;
+        let active = scope
+            .create_instance::<TxAgent>("active", Config { clk, active: true }.into_context())?;
         let passive = scope.create_instance::<TxAgent>(
             "passive",
             InstanceContext::new(Config { clk, active: false }),

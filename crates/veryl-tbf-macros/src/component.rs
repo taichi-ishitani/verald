@@ -40,6 +40,9 @@ fn kind_variant(name: &Ident) -> syn::Result<Ident> {
 struct Args {
     kind: Option<Ident>,
     passive: bool,
+    /// A base test (`#[component(test, base)]`): no `run` needed, not
+    /// registered itself.
+    base: bool,
     sequencer: Option<SequencerArgs>,
     agent: Option<AgentArgs>,
     test: Option<TestArgs>,
@@ -49,9 +52,17 @@ struct Args {
 /// base test and scenarios.
 struct TestArgs {
     base: Type,
-    pre_run: Option<Type>,
-    run: Option<Type>,
-    post_run: Option<Type>,
+    pre_run: Option<Step>,
+    run: Option<Step>,
+    post_run: Option<Step>,
+}
+
+/// How a test made from a base does a step, when not as the base does.
+enum Step {
+    /// `run = S`: the scenario `S`.
+    Scenario(Box<Type>),
+    /// `run`: the test's own method of the step's name.
+    Method,
 }
 
 struct SequencerArgs {
@@ -76,6 +87,7 @@ impl Parse for Args {
         let mut args = Args {
             kind: None,
             passive: false,
+            base: false,
             sequencer: None,
             agent: None,
             test: None,
@@ -83,6 +95,7 @@ impl Parse for Args {
         for meta in metas {
             match meta {
                 Meta::Path(path) if path.is_ident("passive") => args.passive = true,
+                Meta::Path(path) if path.is_ident("base") => args.base = true,
                 Meta::Path(path) => {
                     let ident = path
                         .get_ident()
@@ -163,11 +176,14 @@ impl Parse for Args {
                     });
                 }
                 Meta::List(list) if list.path.is_ident("test") => {
-                    let (mut base, mut pre_run, mut run, mut post_run) = (None, None, None, None);
+                    let mut base = None;
+                    let (mut pre_run, mut run, mut post_run) = (None, None, None);
                     list.parse_nested_meta(|nested| {
-                        let slot = if nested.path.is_ident("base") {
-                            &mut base
-                        } else if nested.path.is_ident("pre_run") {
+                        if nested.path.is_ident("base") {
+                            base = Some(nested.value()?.parse::<Type>()?);
+                            return Ok(());
+                        }
+                        let slot = if nested.path.is_ident("pre_run") {
                             &mut pre_run
                         } else if nested.path.is_ident("run") {
                             &mut run
@@ -175,10 +191,15 @@ impl Parse for Args {
                             &mut post_run
                         } else {
                             return Err(nested.error(
-                                "expected `base = ..`, `pre_run = ..`, `run = ..` or `post_run = ..`",
+                                "expected `base = ..`, and `pre_run`, `run` or `post_run`, \
+                                 each `= Scenario` or alone (the test's own method)",
                             ));
                         };
-                        *slot = Some(nested.value()?.parse::<Type>()?);
+                        *slot = Some(if nested.input.peek(Token![=]) {
+                            Step::Scenario(Box::new(nested.value()?.parse::<Type>()?))
+                        } else {
+                            Step::Method
+                        });
                         Ok(())
                     })?;
                     let base =
@@ -259,14 +280,22 @@ fn on_struct(args: Args, mut item: ItemStruct) -> syn::Result<TokenStream2> {
         .clone()
         .ok_or_else(|| syn::Error::new(item.ident.span(), "`#[component(..)]` needs a kind"))?;
     let variant = kind_variant(&kind)?;
+    if args.base && kind != "test" {
+        return Err(syn::Error::new(
+            kind.span(),
+            "`base` marks a base test: `#[component(test, base)]`",
+        ));
+    }
     let core = core();
     let name = item.ident.clone();
     let context = take_context(&mut item)?;
     let has_context = has_context(&name, &context)?;
     let ports = port_impls(&name, &mut item)?;
+    let base = args.base;
     let declared = quote! {
         impl #core::__private::DeclaredKind for #name {
             const KIND: #core::Kind = #core::Kind::#variant;
+            const BASE: bool = #base;
         }
     };
     if let Some(agent) = args.agent {
@@ -275,9 +304,13 @@ fn on_struct(args: Args, mut item: ItemStruct) -> syn::Result<TokenStream2> {
     if let Some(test) = args.test {
         return test_struct(item, test, declared);
     }
-    // A test is the target of its own specs.
+    // A test is the target of its own specs; one not a base may be
+    // registered.
+    let registrable =
+        (kind == "test" && !base).then(|| quote!(impl #core::__private::Registrable for #name {}));
     let spec_target = (kind == "test").then(|| {
         quote! {
+            #registrable
             impl #core::__private::SpecTarget for #name {
                 type Target = Self;
                 fn __target(&mut self) -> &mut Self {
@@ -696,8 +729,10 @@ fn test_struct(
             ));
         }
     };
-    let step = |scenario: Option<Type>, fallback: TokenStream2| match scenario {
-        Some(scenario) => quote! {
+    // A step's scenario, the test's own method (an inherent method, which
+    // `<Name>::step` finds before the trait's), or the base's.
+    let step = |given: Option<Step>, method: &str, fallback: TokenStream2| match given {
+        Some(Step::Scenario(scenario)) => quote! {
             #core::Scenario::body(
                 &mut <#scenario as ::core::default::Default>::default(),
                 &mut self.base,
@@ -705,18 +740,25 @@ fn test_struct(
             )
             .await
         },
+        Some(Step::Method) => {
+            let method = Ident::new(method, Span::call_site());
+            quote!(<#name>::#method(self, run_context).await)
+        }
         None => fallback,
     };
     let pre_run = step(
         pre_run,
+        "pre_run",
         quote!(#core::Test::pre_run(&mut self.base, run_context).await),
     );
     let run = step(
         run,
+        "run",
         quote!(#core::Component::run(&mut self.base, run_context).await),
     );
     let post_run = step(
         post_run,
+        "post_run",
         quote!(#core::Test::post_run(&mut self.base, run_context).await),
     );
     Ok(quote! {
@@ -785,6 +827,8 @@ fn test_struct(
             }
         }
 
+        impl #core::__private::Registrable for #name {}
+
         /// Its specs are written for the base.
         impl #core::__private::SpecTarget for #name {
             type Target = <#base as #core::__private::SpecTarget>::Target;
@@ -846,18 +890,55 @@ fn on_impl(args: Args, mut item: ItemImpl) -> syn::Result<TokenStream2> {
             "a passive component has no `run`: ports write to it during the run phase",
         ));
     }
-    if kind == "test" && !has_run {
+    if args.base && kind != "test" {
         return Err(syn::Error::new(
-            item.self_ty.span(),
-            "a test needs a `run`: the run phase ends when it returns",
+            kind.span(),
+            "`base` marks a base test: `#[component(test, base)]`",
         ));
     }
-    if !args.passive && !has_run {
+    if kind == "test" && !has_run && !args.base {
+        return Err(syn::Error::new(
+            item.self_ty.span(),
+            "a test needs a `run`: the run phase ends when it returns \
+             (a base test, which tests made from it give one, is `#[component(test, base)]`)",
+        ));
+    }
+    if !args.passive && !has_run && !args.base {
         return Err(syn::Error::new(
             item.self_ty.span(),
             format!("a component with no `run` is passive: write `#[component({kind}, passive)]`"),
         ));
     }
+    // A test's own steps (`setup`, `pre_run`, `post_run`) written in the
+    // same impl go to a generated `impl Test`, so the whole test reads in
+    // one place.
+    let test_impl = if kind == "test" {
+        let steps = ["setup", "pre_run", "post_run"];
+        let (moved, kept): (Vec<ImplItem>, Vec<ImplItem>) = item
+            .items
+            .drain(..)
+            .partition(|i| matches!(i, ImplItem::Fn(f) if steps.iter().any(|s| f.sig.ident == s)));
+        item.items = kept;
+        let has_setup = moved
+            .iter()
+            .any(|i| matches!(i, ImplItem::Fn(f) if f.sig.ident == "setup"));
+        if !moved.is_empty() && !has_setup {
+            return Err(syn::Error::new(
+                item.self_ty.span(),
+                "a test with `pre_run` or `post_run` in its impl needs its `setup` there too",
+            ));
+        }
+        (!moved.is_empty()).then(|| {
+            let (impl_generics, _, where_clause) = item.generics.split_for_impl();
+            quote! {
+                impl #impl_generics #core::Test for #self_ty #where_clause {
+                    #(#moved)*
+                }
+            }
+        })
+    } else {
+        None
+    };
     let passive = args.passive;
     item.items.push(syn::parse_quote! {
         const KIND: #core::Kind = #core::Kind::#variant;
@@ -867,8 +948,13 @@ fn on_impl(args: Args, mut item: ItemImpl) -> syn::Result<TokenStream2> {
     });
     let message = format!("the kind on the impl (`{kind}`) differs from the one on the struct");
     let check = format_ident!("__TBF_KIND_CHECK");
+    let base = args.base;
+    let base_message = "`base` is on one of the struct and the impl only: mark both";
+    let base_check = format_ident!("__TBF_BASE_CHECK");
     Ok(quote! {
         #item
+
+        #test_impl
 
         const _: () = {
             #[allow(non_upper_case_globals, dead_code)]
@@ -876,6 +962,11 @@ fn on_impl(args: Args, mut item: ItemImpl) -> syn::Result<TokenStream2> {
                 <#self_ty as #core::__private::DeclaredKind>::KIND as u8
                     == #core::Kind::#variant as u8,
                 #message
+            );
+            #[allow(non_upper_case_globals, dead_code)]
+            const #base_check: () = ::core::assert!(
+                <#self_ty as #core::__private::DeclaredKind>::BASE == #base,
+                #base_message
             );
         };
     })

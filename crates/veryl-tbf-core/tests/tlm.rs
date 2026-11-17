@@ -51,7 +51,7 @@ impl Component for Monitor {
         loop {
             addr += 1;
             self.clk.edge().await;
-            let tx = ItemHandle::new(Tx { addr });
+            let tx = Tx { addr }.into_handle();
             tx.mark_begin();
             self.port.write(&tx);
             self.clk.edge().await;

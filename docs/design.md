@@ -432,13 +432,12 @@ let mut test = scope.create_root::<T>(config)?;          // T::build
 spec.post_build(&mut test);
 
 // a test: setup and build, no spec in sight
-impl Test for RegTest {
+#[component(test)]
+impl Component for RegTest {
+    type Context = RegTestConfig;
     fn setup(setup_context: &mut SetupContext) -> Result<RegTestConfig, TestError> {
         Ok(RegTestConfig::new(setup_context))
     }
-}
-impl Component for RegTest {
-    type Context = RegTestConfig;
     fn build(scope: &Scope, config: RegTestConfig) -> Result<Self, TestError> {
         let env = scope.create_instance::<Env>("env", config.env)?;
         Ok(RegTest { env })
@@ -446,6 +445,14 @@ impl Component for RegTest {
     async fn run(&mut self, run_context: &mut RunContext) -> Result<(), TestError> { .. }
 }
 ```
+
+A test is written in one impl, in the order it runs: `#[component(test)]`
+on `impl Component` moves the test's own steps (`setup`, and `pre_run` /
+`post_run` below) to a generated `impl Test`, so `setup`, `build`,
+`pre_run`, `run`, `post_run` and `check` read top to bottom. The macro
+moves the items as they are (their spans kept, so errors point at the
+user's code); a test whose impl has `pre_run` or `post_run` needs its
+`setup` there too. Writing `impl Test` apart, by hand, still works.
 
 A test type and a spec are paired when the test is registered (see
 [Runner](#runner)).
@@ -488,7 +495,8 @@ pub trait Test: Component {
 The framework calls `pre_run`, `run` (`Component::run`) and `post_run` in
 turn in the test's task, and the run phase ends when `post_run` returns; an
 `Err` stops there (as a fatal error stops UVM's later phases). They are on
-`Test`, not `Component`: only the test's run is split. Checks that take no
+`Test`, not `Component`: only the test's run is split (written in the
+test's one impl all the same, as above). Checks that take no
 time stay in `check`. (`setup` was taken by `Test::setup`; the names follow
 `Spec`'s `pre_build` / `post_build`.)
 
@@ -530,9 +538,56 @@ step optional) generates the test: a field `base` holding the base test
 (and `Deref` / `DerefMut` to it), and a `Component` and `Test` that forward
 `setup`, `build`, `check` and `report` to the base, and for each step call
 the scenario given for it (made with `Default`, given `&mut` the base) or
-else the base's own. The base keeps its place in the hierarchy (its
+else the base's own. A step given alone (`run`, without `= ..`) is the
+test's own method of that name, written in a plain `impl` (UVM's derived
+test writing its `run_phase`); it reaches the base's fields through
+`Deref`, and the base's step through `self.base`:
+
+```rust
+#[component(test(base = RegTest, run))]
+pub struct BasicTest {}
+
+impl BasicTest {
+    async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
+        WriteReadAll::new(self.rounds).start(&self.sequencer).await
+    }
+}
+```
+
+| A step in the attribute | What runs |
+|---|---|
+| left out | the base's |
+| `run = S` | the scenario `S` |
+| `run` | the test's own `run` method |
+
+The steps are named in the attribute, as an agent's `post_build`, since the
+attribute generates the whole `Component` and `Test`: an `impl Component`
+of the user's would clash with them. The base keeps its place in the hierarchy (its
 children are the test's), and a generated test may itself be a base. The
 struct's own fields start at their defaults.
+
+A test meant only as a base, as UVM's `base_test` (a `virtual class`), is
+marked `#[component(test, base)]` on its struct and its impl. It needs no
+`run` (the tests made from it give one; one they do not runs nothing), and
+it cannot be registered: `register_test!` on it does not compile, naming
+it. (`virtual` and `abstract` are Rust keywords; `base` pairs with
+`test(base = ..)`.)
+
+```rust
+#[component(test, base)]
+impl Component for RegTest {
+    type Context = RegTestConfig;
+    fn setup(..) { .. }
+    fn build(..) { .. }
+    async fn pre_run(..) { .. }       // wait for the reset
+    async fn post_run(..) { .. }      // wind up
+}
+
+#[component(test(base = RegTest, run = ReverseScenario))]
+pub struct ReverseTest {}
+
+register_test!(ReverseTest);
+```
 
 - A spec is written for the base test (`Spec<RegTest>`) and serves every
   test made from it: a generated test applies its spec to the base, and

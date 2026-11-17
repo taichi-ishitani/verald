@@ -73,7 +73,7 @@ module regblock (
     }
 }
 
-/// Runs the testbench's `RegTest` against the register block.
+/// Runs the testbench's `BasicTest` against the register block.
 #[test(regblock_test)]
 module regblock_test {
     inst clk: $tb::clock_gen;
@@ -93,7 +93,7 @@ module regblock_test {
         tb.set_interface("bus_mon", bus.monitor);
         tb.option("timeout", 100000);
         tb.set("rounds", 2);
-        tb.start("RegTest");
+        tb.start("BasicTest");
         rst.assert(clk);
         clk.next(100000);
         $finish();

@@ -4,7 +4,6 @@
 
 #![allow(async_fn_in_trait)]
 
-use std::collections::VecDeque;
 use std::convert::Infallible;
 
 use veryl_tbf::prelude::*;
@@ -188,7 +187,8 @@ impl BusDriver {
 }
 
 /// Publishes every transfer the slave accepts: a write at its acceptance, a
-/// read when its data comes back.
+/// read when its data comes back. One request is outstanding at a time, as
+/// the master sends them.
 #[component(monitor)]
 pub struct BusMonitor {
     #[context]
@@ -218,27 +218,27 @@ impl Component for BusMonitor {
     }
 
     async fn run(&mut self, run_context: &mut RunContext) -> Result<(), TestError> {
-        let mut pending: VecDeque<u8> = VecDeque::new();
+        let cb = &mut self.cb;
         loop {
-            tick!(self.cb);
-            let bus = &self.cb.bus;
-            if bus.rvalid {
-                let addr = pending
-                    .pop_front()
-                    .ok_or("read data with no read pending")?;
-                let item = ItemHandle::new(BusItem::new(false, addr, bus.rdata));
-                run_context.trace(format!("read {addr} = {:#06x}", bus.rdata));
-                self.port.write(&item);
+            // A request, until the slave accepts it: at an edge where
+            // `ready` is high with `valid`.
+            tick_until!(cb.bus.valid);
+            if !cb.bus.ready {
+                tick_until!(cb.bus.ready);
             }
-            if bus.valid && bus.ready {
-                if bus.write {
-                    let item = ItemHandle::new(BusItem::new(true, bus.addr, bus.wdata));
-                    run_context.trace(format!("write {} = {:#06x}", bus.addr, bus.wdata));
-                    self.port.write(&item);
-                } else {
-                    pending.push_back(bus.addr);
-                }
-            }
+            let (write, addr, wdata) = (cb.bus.write, cb.bus.addr, cb.bus.wdata);
+            let item = if write {
+                run_context.trace(format!("write {addr} = {wdata:#06x}"));
+                BusItem::new(true, addr, wdata).into_handle()
+            } else {
+                // The data comes back with `rvalid`; the master sends the
+                // next request only after it.
+                tick_until!(cb.bus.rvalid);
+                let rdata = cb.bus.rdata;
+                run_context.trace(format!("read {addr} = {rdata:#06x}"));
+                BusItem::new(false, addr, rdata).into_handle()
+            };
+            self.port.write(&item);
         }
     }
 }
@@ -387,7 +387,10 @@ pub struct RegTestConfig {
     pub rounds: u16,
 }
 
-#[component(test)]
+/// The base of the tests: the configuration, the hierarchy, and what every
+/// test does before and after its scenario. It has no scenario of its own;
+/// the tests below are made from it.
+#[component(test, base)]
 pub struct RegTest {
     env: Instance<RegEnv>,
     sequencer: SequencerHandle<BusSequencer>,
@@ -395,17 +398,24 @@ pub struct RegTest {
     rounds: u16,
 }
 
-#[component(test)]
+#[component(test, base)]
 impl Component for RegTest {
     type Context = RegTestConfig;
 
+    fn setup(setup_context: &mut SetupContext) -> Result<RegTestConfig, TestError> {
+        Ok(RegTestConfig {
+            rounds: setup_context.get("rounds")?,
+        })
+    }
+
     fn build(scope: &Scope, config: RegTestConfig) -> Result<Self, TestError> {
-        let context = InstanceContext::new(BusConfig {
+        let context = BusConfig {
             active: true,
             regs: 8,
             driver_if: "bus",
             monitor_if: "bus_mon",
-        });
+        }
+        .into_context();
         let env = scope.create_instance::<RegEnv>("env", context)?;
         // Taken from the child right after making it.
         let sequencer = env.bus.sequencer_handle();
@@ -414,18 +424,6 @@ impl Component for RegTest {
             sequencer,
             rst: scope.reset("rst")?,
             rounds: config.rounds,
-        })
-    }
-
-    async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
-        WriteReadAll::new(self.rounds).start(&self.sequencer).await
-    }
-}
-
-impl Test for RegTest {
-    fn setup(setup_context: &mut SetupContext) -> Result<RegTestConfig, TestError> {
-        Ok(RegTestConfig {
-            rounds: setup_context.get("rounds")?,
         })
     }
 
@@ -446,12 +444,23 @@ impl Test for RegTest {
     }
 }
 
-register_test!(RegTest);
+// ---------------------------------------------------------------------------
+// The tests, made from RegTest: one writing its `run` itself, the others
+// with a scenario each
+// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// A test made from RegTest and a scenario: RegTest's preparation and
-// wind-up, another body
-// ---------------------------------------------------------------------------
+/// Runs `WriteReadAll`, its `run` written as a method; RegTest's fields are
+/// reached through it.
+#[component(test(base = RegTest, run))]
+pub struct BasicTest {}
+
+impl BasicTest {
+    async fn run(&mut self, _run_context: &mut RunContext) -> Result<(), TestError> {
+        WriteReadAll::new(self.rounds).start(&self.sequencer).await
+    }
+}
+
+register_test!(BasicTest);
 
 /// Writes every register, then reads them back from the last to the first,
 /// interleaving a rewrite of each register after its read.
@@ -493,10 +502,6 @@ impl Scenario for ReverseScenario {
 pub struct ReverseTest {}
 
 register_test!(ReverseTest);
-
-// ---------------------------------------------------------------------------
-// A test made from RegTest and a random scenario
-// ---------------------------------------------------------------------------
 
 /// Random writes and reads, `count` of them, each randomized under the
 /// agent's configuration (so within its registers).

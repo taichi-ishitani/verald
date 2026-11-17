@@ -59,6 +59,24 @@ impl<C, S> InstanceContext<C, S> {
     }
 }
 
+/// `config.into()` where a context is expected, its status made with
+/// `Default`.
+impl<C, S: Default> From<C> for InstanceContext<C, S> {
+    fn from(config: C) -> Self {
+        InstanceContext::with_status(config, S::default())
+    }
+}
+
+/// `config.into_context()`: a configuration, made, put in a context with no
+/// status (`InstanceContext::new`), for a parent to hand its children.
+pub trait IntoContext: Sized {
+    fn into_context(self) -> InstanceContext<Self> {
+        InstanceContext::new(self)
+    }
+}
+
+impl<C> IntoContext for C {}
+
 /// A setting that may change while the test runs: a field of a
 /// configuration, read where it is used, every time. Clones share the value.
 pub struct Knob<T> {
@@ -128,4 +146,6 @@ pub trait HasContext {
 )]
 pub trait DeclaredKind {
     const KIND: Kind;
+    /// Whether it is a base test (`#[component(test, base)]`).
+    const BASE: bool = false;
 }
