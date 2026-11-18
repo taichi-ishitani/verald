@@ -34,6 +34,10 @@ loads as a verification component; its tests are started from a Veryl
   Veryl's seed (`veryl test --seed`).
 - **Reporting**: log levels with a threshold, errors, an error limit, a
   timeout, and a summary with the seed.
+- **SystemVerilog simulators** (a prototype): the same testbench, built
+  with a `dpi` feature, runs on a SystemVerilog simulator through DPI,
+  with a wrapper that passes it the signals at each edge. The adder's test
+  runs on Verilator; see [docs/sv-simulators.md](docs/sv-simulators.md).
 
 Configuration is typed and passed down the hierarchy; there is no
 string-keyed configuration database.
@@ -156,6 +160,11 @@ Each is a Veryl project run with `veryl +local test` in its directory.
 | [`examples/adder`](examples/adder) | the runtime alone: a clocking block driving an adder and checking its sums |
 | [`examples/hooks`](examples/hooks) | the runtime alone: how the simulator calls the testbench around a reset |
 
+`examples/adder/verilator` runs the adder's test on Verilator instead,
+through the DPI host (`make` there; `make run SEED=5`, `make clean`): a
+hand-written wrapper and table, and the testbench built with its `dpi`
+feature.
+
 ## Crates
 
 | Crate | Contents |
@@ -165,6 +174,7 @@ Each is a Veryl project run with `veryl +local test` in its directory.
 | `veryl-tbf-core` | the UVM-like methodology: components, phases, tests, TLM, sequences, sequencers, agents, reporting |
 | `veryl-tbf-macros` | the procedural macros of the others |
 | `veryl-tbf-random` | constrained random; usable on its own |
+| `veryl-tbf-dpi` | a DPI host (a prototype): runs a testbench on a SystemVerilog simulator; its SystemVerilog side is [`dpi/tbf_dpi_pkg.sv`](dpi/tbf_dpi_pkg.sv) |
 
 ## Documents
 
@@ -175,6 +185,8 @@ Each is a Veryl project run with `veryl +local test` in its directory.
   [docs/random-design.md](docs/random-design.md): its implementation.
 - [docs/veryl-proposals.md](docs/veryl-proposals.md): what veryl-tbf would
   want of Veryl.
+- [docs/sv-simulators.md](docs/sv-simulators.md): running a testbench on a
+  SystemVerilog simulator, through DPI.
 
 ## License
 
