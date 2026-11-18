@@ -22,7 +22,8 @@ fn take_log() -> Vec<String> {
     LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, SequenceItem)]
+#[sequence_item(handle = TxRef)]
 struct Tx {
     addr: u32,
 }
@@ -46,7 +47,7 @@ struct TxMonitor {
     #[context]
     context: Context,
     #[analysis_port]
-    port: AnalysisPort<ItemHandle<Tx>>,
+    port: AnalysisPort<TxRef>,
     #[request_port]
     requests: AnalysisPort<u32>,
 }

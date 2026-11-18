@@ -159,7 +159,7 @@ number the configuration gives:
 
 ```rust
 #[randomize(context = BusConfig)]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, SequenceItem)]
 pub struct BusItem {
     #[rand] pub write: bool,
     #[rand] pub addr: u8,
@@ -177,6 +177,11 @@ impl BusItem {
 `#[randomize]` adds a hidden field, so the struct is made with `Default`
 or a constructor of its own (`BusItem::new(write, addr, data)`), not with
 a literal.
+
+`#[derive(SequenceItem)]` adds the alias of the item's handle,
+`BusItemHandle` (`ItemHandle<BusItem>`): items are shared between the
+sequence, the driver and the monitor's subscribers as handles, and the
+ports and subscribers below name it.
 
 ### The configuration
 
@@ -340,7 +345,7 @@ pub struct BusMonitor {
     #[context]
     context: BusContext,
     #[analysis_port]
-    port: AnalysisPort<ItemHandle<BusItem>>,
+    port: AnalysisPort<BusItemHandle>,
     cb: MonitorCb,
 }
 ```
@@ -524,10 +529,10 @@ impl Component for RegScoreboard {
     }
 }
 
-impl Subscriber<ItemHandle<BusItem>> for RegScoreboard {
+impl Subscriber<BusItemHandle> for RegScoreboard {
     type Id = ();
 
-    fn write(&mut self, (): (), item: &ItemHandle<BusItem>) {
+    fn write(&mut self, (): (), item: &BusItemHandle) {
         // update the model, or check a read against it
     }
 }

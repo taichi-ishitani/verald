@@ -669,6 +669,15 @@ between a sequence, its driver and the monitors' subscribers:
 - An item is a plain struct of the user's (`#[derive(Clone, Debug)]`); what
   the framework records about it (its sequence and transaction ids, its
   begin and end) lives in the handle, so items need no macro.
+  `#[derive(SequenceItem)]` only adds the alias of its handle,
+  `type BusItemHandle = ItemHandle<BusItem>` (`<Name>Handle`, or
+  `#[sequence_item(handle = Name)]`), as visible as the item, for the
+  ports and subscribers that name it (`AnalysisPort<BusItemHandle>`). It
+  is named for what it marks, as UVM's `uvm_sequence_item` covers both a
+  sequence's items and a monitor's transactions, and does that only. UVM's
+  `uvm_object_utils` (printing, comparing, copying) is Rust's `Debug`,
+  `PartialEq` and `Clone`; something all objects share (configurations
+  and sequences too), if it comes, is a derive of its own, not this one.
 - A sequence builds and randomizes an item as a plain value (`&mut`), and
   `finish_item` turns it into an `ItemHandle<T>` (an `Rc` underneath),
   which it returns: the sequence keeps the item and reads what the driver
@@ -1684,6 +1693,19 @@ None at present; deferred work is under [TODO](#todo).
   nightly only) are stable: the attribute would add
   `seq_item_port: SeqItemPort<T, R> = SeqItemPort::new()` and `build` would
   end its literal with `..`.
+
+- Utility macros for objects, as UVM's `uvm_object_utils` and its field
+  macros (`uvm_field_*`): a derive for every kind of object
+  (configurations, sequences, items), apart from `SequenceItem`, which
+  only marks items. Rust's `Debug`, `PartialEq` and `Clone` cover
+  printing, comparing and copying today; what such a derive would add is
+  what they cannot: per-field policies (a field left out of a comparison
+  or a printout, as `UVM_NOCOMPARE` / `UVM_NOPRINT`), a printout in a
+  fixed, readable form (UVM's table printer, for logs), and recording
+  for a waveform or a transaction database. Packing to bits is the
+  component SDK's (see
+  [veryl-proposals.md](veryl-proposals.md#types-defined-by-a-components-crate-usable-in-veryl)).
+  Not needed yet.
 
 The UVM features left for later are listed under
 [Taken from UVM](#taken-from-uvm).

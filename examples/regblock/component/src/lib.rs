@@ -17,7 +17,7 @@ use veryl_tbf::runtime::run_with_reset;
 /// monitor) fills in. Random under the agent's configuration, which bounds
 /// the address.
 #[randomize(context = BusConfig)]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, SequenceItem)]
 pub struct BusItem {
     #[rand]
     pub write: bool,
@@ -194,7 +194,7 @@ pub struct BusMonitor {
     #[context]
     context: BusContext,
     #[analysis_port]
-    port: AnalysisPort<ItemHandle<BusItem>>,
+    port: AnalysisPort<BusItemHandle>,
     cb: MonitorCb,
 }
 
@@ -322,10 +322,10 @@ impl Component for RegScoreboard {
     }
 }
 
-impl Subscriber<ItemHandle<BusItem>> for RegScoreboard {
+impl Subscriber<BusItemHandle> for RegScoreboard {
     type Id = ();
 
-    fn write(&mut self, (): (), item: &ItemHandle<BusItem>) {
+    fn write(&mut self, (): (), item: &BusItemHandle) {
         let item = item.borrow();
         let reg = &mut self.model[usize::from(item.addr)];
         if item.write {

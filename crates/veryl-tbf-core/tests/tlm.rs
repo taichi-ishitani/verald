@@ -22,7 +22,7 @@ fn take_log() -> Vec<String> {
     LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, SequenceItem)]
 struct Tx {
     addr: u32,
 }
@@ -31,7 +31,7 @@ struct Tx {
 /// end; and the address alone on `addrs`.
 struct Monitor {
     clk: Clock,
-    port: AnalysisPort<ItemHandle<Tx>>,
+    port: AnalysisPort<TxHandle>,
     addrs: AnalysisPort<u32>,
 }
 
@@ -86,9 +86,9 @@ impl Component for Board {
     }
 }
 
-impl Subscriber<ItemHandle<Tx>> for Board {
+impl Subscriber<TxHandle> for Board {
     type Id = Side;
-    fn write(&mut self, id: Side, item: &ItemHandle<Tx>) {
+    fn write(&mut self, id: Side, item: &TxHandle) {
         self.got.push(format!("{id:?}{}", item.borrow().addr));
     }
 }
@@ -102,7 +102,7 @@ impl Subscriber<u32> for Board {
 
 /// Reads the monitor's transfers in its run, through a FIFO.
 struct Collector {
-    fifo: AnalysisFifo<ItemHandle<Tx>>,
+    fifo: AnalysisFifo<TxHandle>,
     count: usize,
 }
 
@@ -134,7 +134,7 @@ impl Component for Collector {
 #[component(test)]
 struct TlmTest {
     monitor: Instance<Monitor>,
-    waiter: ItemWaiter<ItemHandle<Tx>, u32>,
+    waiter: ItemWaiter<TxHandle, u32>,
     seen: Rc<RefCell<Vec<u32>>>,
     collector: Instance<Collector>,
 }
@@ -154,7 +154,7 @@ impl Component for TlmTest {
         monitor
             .addrs
             .subscribe(move |addr| model.borrow_mut().push(*addr));
-        let waiter = ItemWaiter::new(|tx: &ItemHandle<Tx>| tx.borrow().addr);
+        let waiter = ItemWaiter::new(|tx: &TxHandle| tx.borrow().addr);
         waiter.subscribe_to(&monitor.port);
         Ok(TlmTest {
             monitor,
