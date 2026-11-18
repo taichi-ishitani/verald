@@ -58,7 +58,7 @@ The decisions below come back to these:
   Veryl, and the testbench follows them: values are assigned in the test
   module and reach the testbench through `set` alone, so they come from one
   place, and what Veryl cannot yet hand over is proposed to Veryl (see
-  [TODO](#todo)) rather than duplicated in Rust.
+  [veryl-proposals.md](veryl-proposals.md)) rather than duplicated in Rust.
 
 ## Simulator interface
 
@@ -1672,8 +1672,9 @@ None at present; deferred work is under [TODO](#todo).
   edge after the sequence has its response.)
 
 - Choosing the test at run time (`+UVM_TESTNAME`), once Veryl passes
-  arguments into a simulation (see below): the runner would take the test's
-  name, and the options, from them.
+  arguments into a simulation (see
+  [veryl-proposals.md](veryl-proposals.md#arguments-into-a-simulation)):
+  the runner would take the test's name, and the options, from them.
 
 - Ports put in by the attribute: a driver's `#[seq_item_port]` and a
   monitor's `#[analysis_port]` fields are always the same shape, but the
@@ -1702,64 +1703,5 @@ framework:
 
 ### Proposals to Veryl
 
-- Arguments into a simulation, so that a test can be chosen at run time,
-  like UVM's `+UVM_TESTNAME`, and one `#[test]` module can run any test.
-  Veryl would need a `veryl test` option for them (or per-test arguments in
-  `Veryl.toml`) and an API for a component to read them. A file the
-  testbench reads is no substitute today: reads resolve against the project
-  root, shared by every test (only writes go to a per-test directory,
-  `target/veryl-components/out/<test>`), and a component cannot learn its
-  test's name.
-
-- Clocking blocks as a language feature. The timing is
-  there already (hooks read values before the edge and writes reach the
-  design at it); what is missing is the declaration. What veryl-tbf would
-  need of it:
-  - the clock and edge a clocking block follows (the interface's clock, as
-    the reference-arguments work allows);
-  - the direction of each member, sampled or driven (possibly from the
-    modport);
-  - passing one to a component method by reference
-    (`tb.set_interface("apb", bus.cb)`), the component getting its members'
-    names, widths and directions and its clock, as a `ModportRef` grown;
-  - the timing written down as the semantics: inputs before the edge,
-    outputs at it; SystemVerilog's skews mean nothing in a cycle-based
-    simulator and can be left out;
-  - emitted as SystemVerilog `clocking` blocks, which a DPI bridge builds on;
-  - usable in Veryl test modules too (`cb.next()`), not only by components.
-
-  With it, veryl-tbf would no longer have users write `#[modport]` /
-  `#[clocking]` structs by hand (they would be generated from, or checked
-  against, the declaration), and `tick` would know its clock; the value
-  conversions and the wait macros stay in Rust. Until then the Rust-side
-  `#[clocking]` is used, its binding (where the members and the clock come
-  from) kept apart so that it can be replaced.
-
-- Rust bindings for Veryl's types. Settings are assigned
-  in Veryl and the design's types (structs, enums, package parameters) are
-  defined there, so Veryl is the source and Rust follows: `veryl build`
-  would emit Rust types for them, with their bit layout, as it emits
-  SystemVerilog. Then a test module could pass a whole configuration struct
-  (`tb.set("config", cfg)`, decoded by the generated type, no layout kept
-  in step by hand), and a clocking block could hold a struct-typed modport
-  member (an AXI channel) as a Rust struct. Until then settings are set one
-  value at a time. (Veryl already takes a component's interface from Rust,
-  through its manifest of ports, parameters and methods; no types travel
-  either way.)
-
-- A hook on reset release (`on_reset_release`, the pair of `on_reset`).
-  Today a release calls no hook and is seen only at the next `on_clock`.
-  With the hook, a release would be known when it happens, values to drive
-  at the release could be written then, rather than at the first edge
-  after it.
-
-- `%m`, the hierarchical name of the current scope, as a
-  format specifier, as in SystemVerilog. A setting given per instance is
-  best keyed by the HDL hierarchy (each module of the harness sets its own:
-  `u_apb[0].data_width`). With `%m` among the format specifiers (`$display`
-  and the like), a key can be written as `"%m.data_width"`. For it to reach
-  a component method as a string, either the string argument of a method
-  call is formatted before the call (`tb.set("%m.data_width", W)`), or a
-  formatted string (an `$sformatf` equivalent) can be passed as an argument
-  (today only string literals arrive as strings; other expressions arrive
-  as bits).
+What veryl-tbf would want of Veryl is kept apart, in
+[veryl-proposals.md](veryl-proposals.md).

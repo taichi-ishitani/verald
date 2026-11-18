@@ -173,6 +173,8 @@ Each is a Veryl project run with `veryl +local test` in its directory.
   and what was taken from UVM.
 - [docs/random.md](docs/random.md): constrained random, as users write it;
   [docs/random-design.md](docs/random-design.md): its implementation.
+- [docs/veryl-proposals.md](docs/veryl-proposals.md): what veryl-tbf would
+  want of Veryl.
 
 ## License
 
