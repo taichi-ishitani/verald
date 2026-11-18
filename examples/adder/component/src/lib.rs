@@ -83,4 +83,12 @@ impl Testbench for Adder {
     }
 }
 
+#[cfg(not(feature = "dpi"))]
 veryl_tbf_runtime::export!("tbf_adder", Adder);
+
+// The same testbench, for a SystemVerilog simulator (see `verilator/`).
+#[cfg(feature = "dpi")]
+mod dpi {
+    veryl_tbf_runtime::component!(pub Tb, super::Adder);
+    veryl_tbf_dpi::export!(Tb);
+}

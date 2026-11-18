@@ -1,0 +1,42 @@
+# How the signals bound to the testbench are packed (see
+# `docs/sv-simulators.md`): a `signal_map` entry per modport or single signal,
+# with its layout's members in order, the first most significant; an entry's
+# inputs and its outputs are packed apart, each in this order.
+# Written by hand; Veryl would generate it with the wrapper.
+
+[layout.adder_tb]
+members = [
+  { name = "start",  dir = "out", width = 1 },
+  { name = "a",      dir = "out", width = 8 },
+  { name = "b",      dir = "out", width = 8 },
+  { name = "done",   dir = "in",  width = 1 },
+  { name = "result", dir = "in",  width = 9 },
+]
+
+[layout.count]
+members = [
+  { name = "count", dir = "in", width = 8 },
+]
+
+[[signal_map]]
+key       = 0
+path      = "top.bus"
+kind      = "modport"
+layout    = "adder_tb"
+interface = "adder_if"
+modport   = "tb"
+
+[[signal_map]]
+key    = 1
+path   = "top.count"
+kind   = "signal"
+layout = "count"
+
+[[clock]]
+key   = 0
+path  = "top.clk"
+reset = 0
+
+[[reset]]
+key  = 0
+path = "top.rst"

@@ -12,6 +12,12 @@ veryl-tbf-runtime = { path = "../../../crates/veryl-tbf-runtime" }
 # The component derives refer to `::veryl_component`; the same revision as
 # the runtime's.
 veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/component-method-ref-args" }
+# The DPI host, for a build that runs on a SystemVerilog simulator.
+veryl-tbf-dpi = { path = "../../../crates/veryl-tbf-dpi", optional = true }
+
+[features]
+# Builds for a SystemVerilog simulator (see `verilator/`) instead of Veryl's.
+dpi = ["dep:veryl-tbf-dpi"]
 
 # Standalone package.
 [workspace]

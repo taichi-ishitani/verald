@@ -1,9 +1,10 @@
 # Running a testbench on a SystemVerilog simulator
 
-A thought experiment, not implemented: how a testbench built with veryl-tbf
-would run on a SystemVerilog simulator as well as on Veryl's, with the
-testbench's code unchanged. It records the shape agreed so far and the
-reasons behind it.
+How a testbench built with veryl-tbf would run on a SystemVerilog simulator
+as well as on Veryl's, with the testbench's code unchanged: the shape
+agreed so far, the reasons behind it, and a prototype
+(`crates/veryl-tbf-dpi`, `dpi/`, `examples/adder/verilator`) that runs the
+adder's test on Verilator.
 
 ## Contents
 
@@ -80,9 +81,8 @@ always @(posedge i_clk, negedge i_rst_n) begin
     tbf_sample(1, {bus1.ready, bus1.rvalid, bus1.rdata});   // bus 1's
     if (!i_rst_n) tbf_on_reset(0 /* clock */, $time);
     else          tbf_on_clock(0 /* clock */, $time);
-    tbf_drive(0, out0, en0);                                 // bus 0's outputs, those written
-    tbf_drive(1, out1, en1);
-    // drive out0 / en0 to bus0's members with nonblocking assignments, ..
+    if (tbf_drive(0, out0)) {bus0.valid, bus0.addr, ..} <= out0[..];  // bus 0's outputs
+    if (tbf_drive(1, out1)) {bus1.valid, bus1.addr, ..} <= out1[..];
 end
 ```
 
@@ -95,32 +95,40 @@ end
 - Buses on the same clock and reset are lines in the same `always`; the
   hooks take a clock's key and the time only. A call per bus each way and
   one for the hook, all light, non-`context` functions.
-- The host keeps each instance's latest inputs and returns them when the
+- The host keeps each entry's latest inputs and returns them when the
   testbench reads; which clock a bus follows is the wrapper's `always`,
   not the host's concern.
 
-- A packed vector of any width crosses DPI as an array of 32-bit words
+- A packed vector crosses DPI as an array of 32-bit words
   (`svBitVecVal`, word 0 the least significant), close to `Value`'s 64-bit
-  words; only scalar types (`int`, `longint`) are bounded.
-- What crosses is a key and bits: the key names an instance (a modport
-  bound to the testbench); its layout and width come from a table, so no
-  width is passed. Clocks and resets have keys too, for the hooks.
+  words. An import declares one type for every call, while entries differ
+  in width, so the vectors are of one fixed width, `TBF_MAX_W` (1024 bits
+  unless `TBF_DPI_MAX_WIDTH` is defined), narrower entries zero-extended;
+  the wrapper gives the width to `tbf_init`, so the host reads and writes
+  as many words. (Open arrays would lift the bound; a fixed width is
+  simpler and enough.)
+- What crosses is a key and bits: the key names a `signal_map` entry (a
+  modport or a single signal bound to the testbench); its layout and width
+  come from a table, so no width is passed. Clocks and resets have keys
+  too, for the hooks.
 - The table has two levels:
   - layouts, one per modport kind: each member's name, direction and
     width, in order (a parameterized interface gives one layout per set of
     widths);
-  - instances: a key and the layout it is packed with; and the clocks,
+  - signal maps: a key, the signals' path, whether they are a modport or
+    a single signal, and the layout they are packed with; and the clocks,
     each with its reset.
 - The names the testbench looks up (`"bus"`) are bound to keys by the
   wrapper's registration calls (`tbf_set_interface("bus", 0)`), as the
   test module's `tb.set_interface("bus", bus.master)` binds them today;
   the table describes packing only.
-- The table and the wrapper carry the same hash, compared once when the
-  host starts (`tbf_init`), so a table and a wrapper made apart are
-  caught there, not per call.
-- Outputs the testbench wrote are driven, flagged in `en`; the others are
-  left as they were (an `#[output]` with no `init` stays undriven, as on
-  Veryl's simulator).
+- `tbf_drive` returns 1 when the testbench wrote any output of the entry
+  since the last call; the wrapper then updates all of the entry's
+  outputs, and otherwise leaves them as they were. One flag per entry
+  keeps the wrapper to one assignment per bus. The outputs stay undriven
+  until the testbench first writes one (an `#[output]` with no `init` is
+  not driven, as on Veryl's simulator), but from then on the entry's
+  outputs are driven together, the ones not yet written at 0.
 - The table and the wrapper are written by hand for now. Generating them
   belongs to Veryl, which alone knows the interfaces, their parameters and
   the bindings of a test module (see
@@ -136,9 +144,10 @@ members = [
   # ..
 ]
 
-[[instance]]
+[[signal_map]]
 key    = 0
 path   = "regblock_test.bus"     # for messages
+kind   = "modport"               # or "signal"
 layout = "bus_master"
 
 [[clock]]
@@ -207,8 +216,10 @@ end
 
 ## Logs, seeds, time, X
 
-- Logs, and a failure's summary, go to Rust's standard output: the DPI
-  library runs in the simulator's process. If their order against the
+- Logs, and a failure's summary, go to Rust's standard output, in Veryl's
+  form, `[<instance>] cycle <n>: <message>` (the instance's label given
+  to `tbf_init`, the edges counted): the DPI library runs in the
+  simulator's process. If their order against the
   simulator's own output (buffered when redirected) or their absence from
   its log file (VCS's `-l`) matters, `vpi_printf` can be added behind a
   feature.
@@ -234,45 +245,49 @@ All are non-`context` functions that return at once.
 
 | Function | |
 |---|---|
-| `tbf_init(layout, hash, seed)` | loads the table, checks the hash, takes the seed; calls `on_init` |
-| `tbf_set_clock(name, key)`, `tbf_set_reset(name, key)`, `tbf_set_interface(name, key)` | binds a name the testbench looks up to an instance |
+| `tbf_init(label, table, seed, vector_width)` | loads the table, takes the seed and the vectors' width (`TBF_MAX_W`); creates the testbench and calls `on_init` |
+| `tbf_set_clock(name, key)`, `tbf_set_reset(name, key)` | binds a name the testbench looks up to a clock or a reset |
+| `tbf_set_interface(name, key)`, `tbf_set_input(name, key)`, `tbf_set_output(name, key)` | binds a name to a `signal_map` entry |
 | `tbf_set(key, value)`, `tbf_option(key, value)` | the test's settings and the framework's options |
 | `tbf_start(test, time)` | starts the test; not zero if it could not (no such test, a failed build) |
-| `tbf_sample(instance, in)` | an instance's inputs, before the hook |
+| `tbf_sample(key, in)` | a `signal_map` entry's inputs, before the hook |
 | `tbf_on_clock(clock, time)`, `tbf_on_reset(clock, time)` | the hooks |
-| `tbf_drive(instance, out, en)` | an instance's outputs written by the hook, and which were |
+| `tbf_drive(key, out)` | a `signal_map` entry's outputs after the hook; 1 if any was written, when the wrapper updates them all |
 | `tbf_status()` | 0 running, 1 passed, 2 failed |
 | `tbf_on_finish(time)` | from `final` |
 
 ## A prototype
 
-`veryl_component::testing::MockSim` is already a host in Rust: signals by
-name (`set`, `get`), references (`modport_ref`, `clock_ref`, `reset_ref`),
-hooks (`init`, `clock`, `reset`, `finish`), methods (`call`), and status
-(`finish_requested`, `failed`), with `time` and `seed` settable. A DPI
-host can be a thin layer over it, in veryl-tbf, with no change to Veryl:
+The prototype is a host of its own, not a layer over
+`veryl_component::testing::MockSim`: the SDK's C ABI is public
+(`veryl_component::export`'s entry points, which Veryl's simulator calls,
+and `sys::VrlHostApi`, the table of host services), so the host implements
+the services and calls the entry points as Veryl's simulator does. It
+records the testbench's writes itself (for `tbf_drive`'s flag), and keeps
+each port's words for direct access.
 
-```rust
-#[no_mangle]
-extern "C" fn tbf_sample(instance: i32, inputs: *const u32) {
-    // slice `inputs` by the instance's layout and `sim.set` each member
-}
+- `crates/veryl-tbf-dpi`: the host and `export!(Component)`, which a
+  testbench's crate invokes in place of `export!` under a `dpi` feature,
+  to generate the DPI functions.
+- `dpi/tbf_dpi_pkg.sv`: the DPI functions' declarations, for any wrapper,
+  and `tbf_wait_end(interval)`, which polls the status every `interval`
+  (in ns) and reports the result (`$fatal` on a failure).
+- `examples/adder/verilator`: the wrapper and the table, by hand, and a
+  `Makefile` (`make`, `make run SEED=5`, `make clean`). The adder's test
+  passes as on Veryl's simulator, and a broken adder fails it.
 
-#[no_mangle]
-extern "C" fn tbf_on_clock(clock: i32, time: u64) {
-    // set the time and the fired clock; `sim.clock(..)`
-}
+What the prototype leaves out:
 
-#[no_mangle]
-extern "C" fn tbf_drive(instance: i32, outputs: *mut u32, enables: *mut u32) {
-    // pack the instance's outputs with `sim.get`, and which were written
-}
-```
-
-Its size, with the table written by hand: some 500 to 700 lines of Rust
-(the entry points, reading the table, the feature) and some 100 to 150
-lines of SystemVerilog per testbench. `MockSim` keeps signals in a map by
-name, which is slow for production and does not record which outputs were
-written (for `en`); a host of its own in the SDK, reading by offset, would
-replace it once the approach is proven. Verilator supports DPI-C, so the
-prototype can be tried on it.
+- Settings and options are 64-bit integers only (no strings, nothing
+  wider).
+- The host services a testbench of veryl-tbf does not use are empty: files,
+  traces and parameters.
+- One testbench per simulation: one host, one `tbf_init`.
+- A table's member is an input or an output; a clock or a reset inside a
+  modport cannot be described.
+- Methods' return values are dropped (veryl-tbf's methods return none).
+- The cycle count in messages counts every hook, the reset's included,
+  and follows the wrapper's reset, so it differs from Veryl's.
+- Not tried yet: several clocks, an unexpected finish (`final`),
+  `tbf_set_output`, a release build of the library.
+- The table and the wrapper are written by hand.

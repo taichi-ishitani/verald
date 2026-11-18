@@ -1,0 +1,13 @@
+[package]
+name = "veryl-tbf-dpi"
+description = "A DPI host for veryl-tbf testbenches: runs them on a SystemVerilog simulator (a prototype)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+veryl-component.workspace = true

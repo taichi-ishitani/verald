@@ -2,3 +2,8 @@
 /component/target
 /dependencies
 /.build
+# What `verilator/Makefile` generates.
+/adder.f
+/src/*.sv
+/src/*.sv.map
+/verilator/obj_dir
