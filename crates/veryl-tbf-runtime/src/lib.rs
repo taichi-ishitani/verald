@@ -120,6 +120,16 @@ macro_rules! component {
                 $crate::host::set_clock(ctx, name, clk)
             }
 
+            /// Makes the clock registered as `name` the master clock, which
+            /// the timeout counts (the first registered by default).
+            fn set_master_clock(
+                &mut self,
+                ctx: &mut ::veryl_component::SimCtx,
+                name: ::std::string::String,
+            ) -> ::veryl_component::Result<()> {
+                $crate::host::set_master_clock(ctx, name)
+            }
+
             /// Registers a reset under `name`.
             fn set_reset(
                 &mut self,

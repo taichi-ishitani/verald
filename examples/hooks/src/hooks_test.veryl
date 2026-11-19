@@ -10,10 +10,9 @@ module hooks_test {
     initial {
         tb.set_clock("clk", clk);
         tb.set_reset("rst", rst);
-        tb.option("timeout", 100000);
+        tb.option("timeout", 100);
         tb.start("hooks");
+        clk.start();
         rst.assert(clk);
-        clk.next(1000);
-        $finish();
     }
 }

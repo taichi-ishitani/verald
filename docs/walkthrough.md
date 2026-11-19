@@ -89,19 +89,21 @@ module regblock_test {
         tb.set_interface("bus", bus.master);    // the driver's side
         tb.set_interface("bus_mon", bus.monitor);
         tb.start("BasicTest");                  // the test, by its registered name
+        clk.start();                            // runs until the test ends
         rst.assert(clk);
-        clk.next(100000);
-        $finish();
     }
 }
 ```
 
 - The testbench finds signals by the names registered here, never by HDL
   paths: a component asks for `"clk"` or `"bus"`.
-- `start` builds the named test and starts its run. The test ends the
-  simulation when it is done; the timeout and the trailing `$finish` are
-  safety nets, and a `$finish` reached while the test still runs is
-  reported as an unexpected finish.
+- `start` builds the named test and starts its run. `clk.start()` keeps
+  the clock running until the test ends: the testbench ends the simulation
+  when the test is done, so the test module sets no number of cycles. A
+  hung test is ended by the framework's timeout (10,000,000 cycles of the
+  first clock registered, by default; `TBF_TIMEOUT` below). A `$finish`
+  in the test module reached while the test still runs is reported as an
+  unexpected finish.
 
 The module is the harness every test shares; which test runs, and the
 framework's options, are given when it runs, as runtime arguments, as
@@ -114,8 +116,8 @@ veryl +local test --runtime-arg=TBF_TESTNAME:ReverseTest --runtime-arg=TBF_TIMEO
 - `TBF_TESTNAME` names the test over the one given to `start`: the
   testbench has `BasicTest`, `ReverseTest` and `RandomTest`; `BasicTest`
   runs when none is named.
-- `TBF_<OPTION>` sets an option of the framework: `TBF_TIMEOUT` (the time
-  the test must end by), `TBF_LOG_LEVEL` (`error` .. `trace`, `info` by
+- `TBF_<OPTION>` sets an option of the framework: `TBF_TIMEOUT` (the
+  cycles the test must end within; `0` for no limit), `TBF_LOG_LEVEL` (`error` .. `trace`, `info` by
   default), `TBF_MAX_ERRORS`. A test module may also give options with
   `tb.option(key, value)`; a runtime argument overrides it.
 - A misspelt one (`TBF_LOG_LEVL`) fails the test, listing the options.

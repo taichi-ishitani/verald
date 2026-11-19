@@ -231,8 +231,9 @@ end
   simulator with the seed the report summary shows.
 - Time is passed with each hook (`$time`), and with `tbf_start` and
   `tbf_on_finish`; veryl-tbf reads it only there (log lines, the summary,
-  the timeout, `RunContext::time`). Its unit is the simulator's timescale,
-  so the `timeout` option is given in that unit.
+  `RunContext::time`). Its unit is the simulator's timescale. The
+  `timeout` option counts cycles of the master clock, the first registered
+  (the DPI functions have no `tbf_set_master_clock` yet).
 - The DPI arguments are `bit`, so X and Z become 0 in SystemVerilog's
   conversion, as veryl-tbf reads them on Veryl's simulator; only a
   clocking-block field of type `Value` sees a difference (it keeps X on

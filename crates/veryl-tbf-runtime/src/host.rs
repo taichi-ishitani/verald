@@ -11,10 +11,8 @@
 //!     tb.set_clock("clk", clk);
 //!     tb.set_reset("rst", rst);
 //!     tb.set_interface("bus", bus.tb);
-//!     tb.option("timeout", 100000);
 //!     tb.start("my_test");
-//!     clk.next(1000000);
-//!     $finish();
+//!     clk.start();
 //! }
 //! ```
 //!
@@ -68,7 +66,10 @@ pub trait Testbench: 'static {
 }
 
 /// The options the runtime takes itself.
-const RUNTIME_OPTIONS: &[(&str, &str)] = &[("timeout", "u64: the time the test must end by")];
+const RUNTIME_OPTIONS: &[(&str, &str)] = &[(
+    "timeout",
+    "u64: the cycles of the master clock the test must end within; 0 for no limit; 10000000 by default",
+)];
 
 /// What `Testbench::start` builds the test with.
 pub struct Start {
@@ -311,13 +312,20 @@ fn alive() -> String {
     }
 }
 
+/// Ends the run phase with a fatal error once the master clock has passed
+/// the timeout's edges: the test may end at the last edge allowed, so the
+/// edge after it is checked, before any task runs at it.
 fn check_timeout() {
-    let Some(deadline) = with_state(|s| s.timeout) else {
-        return;
-    };
-    let now = sim::time();
-    if now >= deadline && with_state(|s| s.phase) == Phase::Running {
-        let error = TestError::new(format!("timeout at time {now}; {}", alive()));
+    let passed = with_state(|s| {
+        let master = s.master_clock.or((!s.clocks.is_empty()).then_some(0))?;
+        let clock = &s.clocks[master];
+        (s.timeout > 0 && clock.edges > s.timeout).then(|| (clock.name.clone(), s.timeout))
+    });
+    if let Some((clock, timeout)) = passed {
+        let error = TestError::new(format!(
+            "timeout after {timeout} cycles of `{clock}`; {}",
+            alive()
+        ));
         end(RunEnd::Fatal {
             owner: String::new(),
             error,
@@ -384,7 +392,6 @@ pub fn on_clock(ctx: &mut SimCtx) -> HookResult {
         return Ok(());
     };
     if with_state(|s| s.phase) == Phase::Running {
-        check_timeout();
         let fired: Vec<usize> = with_state(|s| {
             s.clocks
                 .iter()
@@ -401,6 +408,11 @@ pub fn on_clock(ctx: &mut SimCtx) -> HookResult {
             }
             with_state(|s| s.clocks[i].recycle(list));
         }
+        check_timeout();
+        if with_state(|s| s.phase) != Phase::Running {
+            leave();
+            return Ok(());
+        }
         let released: Vec<std::task::Waker> =
             with_state(|s| s.resets.iter_mut().flat_map(|r| r.set(false)).collect());
         wake_all(released);
@@ -416,7 +428,6 @@ pub fn on_reset(ctx: &mut SimCtx) -> HookResult {
         return Ok(());
     };
     if with_state(|s| s.phase) == Phase::Running {
-        check_timeout();
         let asserted: Vec<std::task::Waker> = with_state(|s| {
             s.resets
                 .iter_mut()
@@ -480,6 +491,17 @@ pub fn set_clock(_ctx: &mut SimCtx, name: String, clk: ClockPort) -> HookResult 
     Ok(())
 }
 
+/// `set_master_clock(name)`: the clock the timeout counts, over the first
+/// registered.
+pub fn set_master_clock(_ctx: &mut SimCtx, name: String) -> HookResult {
+    in_setup("set_master_clock")?;
+    let Some(index) = with_state(|s| s.clocks.iter().position(|c| c.name == name)) else {
+        bail!("set_master_clock: no clock is registered as `{name}`");
+    };
+    with_state(|s| s.master_clock = Some(index));
+    Ok(())
+}
+
 /// `set_reset(name, rst)`: registers a reset.
 pub fn set_reset(_ctx: &mut SimCtx, name: String, rst: ResetPort) -> HookResult {
     in_setup("set_reset")?;
@@ -539,10 +561,10 @@ pub fn option<T: Testbench>(_ctx: &mut SimCtx, key: String, value: Value) -> Hoo
 /// Takes an option, from the test module or from a runtime argument.
 fn take_option<T: Testbench>(key: &str, value: &Value) -> Result<(), TestError> {
     if key == "timeout" {
-        let time = value
+        let edges = value
             .as_u64()
             .map_err(|e| TestError::new(format!("option `timeout`: {e}")))?;
-        with_state(|s| s.timeout = Some(time));
+        with_state(|s| s.timeout = edges);
         return Ok(());
     }
     match T::option(key, value) {

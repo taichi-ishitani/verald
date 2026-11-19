@@ -113,9 +113,8 @@ module regblock_test {
         tb.set_reset("rst", rst);
         tb.set_interface("bus", bus.master);
         tb.start("RegTest");
+        clk.start();                    // runs until the test ends
         rst.assert(clk);
-        clk.next(100000);
-        $finish();
     }
 }
 ```

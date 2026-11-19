@@ -1364,8 +1364,10 @@ Decided:
     and no further error (an unexpected finish) is reported.
 - The timeout is the framework's, as in UVM (`set_timeout`): when it runs
   out before the test's `run` returns, the run phase ends with a fatal
-  error. The test module only keeps the clocks running, with a bound well
-  beyond the timeout; reaching that bound is an unexpected finish.
+  error. The test module only starts the clocks (`clk.start()`, which keeps
+  a clock running until the test ends) and leaves the end to the
+  testbench; a test module ending the simulation itself (`$finish`, a
+  bound on its clock) while the test runs is an unexpected finish.
 - No deadlock detection (every task waiting on something only another task
   could give, none on a clock or a reset): such a test runs into the
   timeout, as in UVM, and the hooks it costs meanwhile return at once. The
@@ -1448,14 +1450,19 @@ Decided:
 - An error limit, as UVM's `max_quit_count`: when the errors reach it, the
   run phase ends with a fatal error (`check` is skipped) naming the limit
   and the last error. Unlimited by default.
-- The timeout (see [Executor](#executor)) is in Veryl's simulation time, the
-  unit of `ctx.time()`, as UVM's is in time: it needs no choice of clock
-  when there are several, and checking it is one comparison at each hook.
-  A timeout in cycles is the test module's multiplication. Unlimited by
-  default: the framework cannot know a design's scale, and UVM's default
-  (9200 s) means unlimited too. Without one, the test module's bound on its
-  clock ends the simulation as an unexpected finish, which, like a timeout,
-  lists the tasks still alive by their components' paths.
+- The timeout (see [Executor](#executor)) is in cycles of the master
+  clock, as Veryl is cycle-based: tests are measured in cycles, and a
+  clock's period in time is no concern of theirs. The master clock is the
+  first registered; the test module names another with
+  `tb.set_master_clock(name)` when that one is not the clock to count.
+  Checking it is one comparison at the master clock's edges: the test may
+  end at the last cycle allowed, and the cycle after it ends the run phase
+  with a fatal error, before any task runs at it, listing the tasks still
+  alive by their components' paths.
+  - A default as UVM's (`UVM_DEFAULT_TIMEOUT`): 10,000,000 cycles, beyond
+    any usual test, so that a hung one still ends now that the test module
+    keeps its clocks running with no bound of its own (`clk.start()`). The
+    `timeout` option (`TBF_TIMEOUT`) sets a test's; `0` is no limit.
 - Settings are given by the Veryl test module (the shared harness), which
   calls methods before `start`, as often as needed; runtime arguments
   override them where UVM's plusargs would (below). The framework's
@@ -1468,8 +1475,7 @@ Decided:
       tb.option("max_errors", 10);
       tb.set("num_masters", N_MASTERS);    // the testbench's: read by the test's setup
       tb.start("RegTest");
-      clk.next(1000000);
-      $finish();
+      clk.start();                         // runs until the testbench finishes the test
   }
   ```
 

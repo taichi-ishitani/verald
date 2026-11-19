@@ -172,8 +172,10 @@ pub(crate) fn summary(test: &str, seed: u64, fatal: Option<(&str, &TestError)>) 
         ));
     }
     sim::log(&counted.join(", "));
-    if let Some((owner, error)) = fatal {
-        sim::log(&format!("fatal: {owner}: {error}"));
+    match fatal {
+        Some(("", error)) => sim::log(&format!("fatal: {error}")),
+        Some((owner, error)) => sim::log(&format!("fatal: {owner}: {error}")),
+        None => {}
     }
 }
 

@@ -235,7 +235,7 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "veryl-component"
 version = "0.1.2"
-source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#1e4496f7d52522cf08cfa50463ec2e4e5f4db269"
+source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#37f252fbca5f592eead47bfdc8459bd73069ac55"
 dependencies = [
  "anyhow",
  "num-bigint",
@@ -247,7 +247,7 @@ dependencies = [
 [[package]]
 name = "veryl-component-macros"
 version = "0.1.2"
-source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#1e4496f7d52522cf08cfa50463ec2e4e5f4db269"
+source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#37f252fbca5f592eead47bfdc8459bd73069ac55"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -257,7 +257,7 @@ dependencies = [
 [[package]]
 name = "veryl-component-sys"
 version = "0.1.2"
-source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#1e4496f7d52522cf08cfa50463ec2e4e5f4db269"
+source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#37f252fbca5f592eead47bfdc8459bd73069ac55"
 
 [[package]]
 name = "veryl-tbf"

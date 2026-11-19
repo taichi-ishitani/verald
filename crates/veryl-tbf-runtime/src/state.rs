@@ -39,6 +39,10 @@ pub enum RunEnd {
 
 pub(crate) type EndHandler = Box<dyn FnOnce(&RunEnd) -> Result<(), TestError>>;
 
+/// The timeout's default, in edges of the master clock: beyond any usual
+/// test, so that a hung one still ends, as UVM's default timeout.
+pub(crate) const DEFAULT_TIMEOUT: u64 = 10_000_000;
+
 pub(crate) struct State {
     pub(crate) phase: Phase,
     pub(crate) clocks: Vec<ClockState>,
@@ -49,8 +53,12 @@ pub(crate) struct State {
     pub(crate) settings: Vec<Setting>,
     /// The runtime arguments, taken at `start`.
     pub(crate) runtime_args: Vec<RuntimeArg>,
-    /// The time the run phase must end by.
-    pub(crate) timeout: Option<u64>,
+    /// The edges of the master clock the run phase must end within; 0 for
+    /// no limit.
+    pub(crate) timeout: u64,
+    /// The clock the timeout counts (an index into `clocks`); the first
+    /// registered unless `set_master_clock` names another.
+    pub(crate) master_clock: Option<usize>,
     pub(crate) main: Option<TaskId>,
     pub(crate) main_done: bool,
     pub(crate) on_end: Option<EndHandler>,
@@ -74,7 +82,8 @@ impl State {
             outputs: Vec::new(),
             settings: Vec::new(),
             runtime_args: Vec::new(),
-            timeout: None,
+            timeout: DEFAULT_TIMEOUT,
+            master_clock: None,
             main: None,
             main_done: false,
             on_end: None,

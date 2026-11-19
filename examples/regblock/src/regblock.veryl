@@ -98,8 +98,7 @@ module regblock_test {
         tb.set_interface("bus", bus.master);
         tb.set_interface("bus_mon", bus.monitor);
         tb.start("BasicTest");
+        clk.start();
         rst.assert(clk);
-        clk.next(100000);
-        $finish();
     }
 }

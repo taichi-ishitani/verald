@@ -66,11 +66,10 @@ module adder_test {
         tb.set_reset("rst", rst);
         tb.set_interface("bus", bus.tb);
         tb.set_input("count", count);
-        tb.option("timeout", 100000);
+        tb.option("timeout", 1000);
         tb.set("count", 20);
         tb.start("adds");
+        clk.start();
         rst.assert(clk);
-        clk.next(10000);
-        $finish();
     }
 }

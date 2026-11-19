@@ -261,15 +261,57 @@ fn a_timeout_is_fatal_and_lists_the_tasks_alive() {
     sim.call(&mut tb, "option", &[str("timeout"), Value::from(5u64)])
         .unwrap();
     sim.call(&mut tb, "start", &[str("forever")]).unwrap();
-    sim.time = 4;
-    clock(&mut sim, &mut tb, 1);
+    // The fifth cycle is still allowed; the sixth is past the timeout.
+    clock(&mut sim, &mut tb, 5);
     assert!(!sim.failed());
-    sim.time = 5;
     clock(&mut sim, &mut tb, 1);
     assert_eq!(
         sim.failures(),
-        ["fatal: timeout at time 5; tasks alive: env.monitor, test"]
+        ["fatal: timeout after 5 cycles of `clk`; tasks alive: env.monitor, test"]
     );
+}
+
+#[test]
+fn the_timeout_counts_the_master_clock() {
+    let (mut sim, mut tb) = setup();
+    let fast = sim.clock_ref("fast");
+    sim.call(&mut tb, "set_clock", &[str("fast"), fast])
+        .unwrap();
+    let error = sim
+        .call(&mut tb, "set_master_clock", &[str("slow")])
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("no clock is registered as `slow`"),
+        "{error}"
+    );
+    sim.call(&mut tb, "set_master_clock", &[str("fast")])
+        .unwrap();
+    sim.call(&mut tb, "option", &[str("timeout"), Value::from(2u64)])
+        .unwrap();
+    sim.call(&mut tb, "start", &[str("forever")]).unwrap();
+    // `clk`, registered first, is not counted once `fast` is the master.
+    clock(&mut sim, &mut tb, 10);
+    assert!(!sim.failed());
+    sim.set_fired_clock("fast");
+    for _ in 0..3 {
+        sim.clock(&mut tb).unwrap();
+    }
+    assert_eq!(
+        sim.failures(),
+        ["fatal: timeout after 2 cycles of `fast`; tasks alive: env.monitor, test"]
+    );
+}
+
+#[test]
+fn a_timeout_of_0_is_no_limit() {
+    let (mut sim, mut tb) = setup();
+    sim.call(&mut tb, "option", &[str("timeout"), Value::from(0u64)])
+        .unwrap();
+    sim.call(&mut tb, "start", &[str("forever")]).unwrap();
+    clock(&mut sim, &mut tb, 100);
+    assert!(!sim.failed());
 }
 
 #[test]
@@ -422,11 +464,10 @@ fn tbf_options_override_the_test_module() {
     sim.call(&mut tb, "option", &[str("timeout"), Value::from(100u64)])
         .unwrap();
     sim.call(&mut tb, "start", &[str("forever")]).unwrap();
-    sim.time = 5;
-    clock(&mut sim, &mut tb, 1);
+    clock(&mut sim, &mut tb, 6);
     assert_eq!(
         sim.failures(),
-        ["fatal: timeout at time 5; tasks alive: env.monitor, test"]
+        ["fatal: timeout after 5 cycles of `clk`; tasks alive: env.monitor, test"]
     );
 }
 
