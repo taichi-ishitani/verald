@@ -7,8 +7,11 @@ loads as a verification component; its tests are started from a Veryl
 
 > **Status:** in development and not released. It depends on unreleased
 > Veryl: [veryl-lang/veryl#3701](https://github.com/veryl-lang/veryl/pull/3701)
-> (signal and modport references passed to component methods), run as
-> `veryl +local`.
+> (signal and modport references passed to component methods) and
+> [veryl-lang/veryl#3717](https://github.com/veryl-lang/veryl/pull/3717)
+> (runtime arguments), merged together in the `tbf` branch of
+> [taichi-ishitani/veryl](https://github.com/taichi-ishitani/veryl/tree/tbf),
+> run as `veryl +local`.
 
 ## Features
 
@@ -33,7 +36,11 @@ loads as a verification component; its tests are started from a Veryl
   random stability: every component and sequence has its own, derived from
   Veryl's seed (`veryl test --seed`).
 - **Reporting**: log levels with a threshold, errors, an error limit, a
-  timeout, and a summary with the seed.
+  timeout, and a summary with the seed and the runtime arguments.
+- **Runtime arguments**: `veryl test --runtime-arg=..` chooses the test
+  (`TBF_TESTNAME`, as UVM's `+UVM_TESTNAME`) and the options
+  (`TBF_TIMEOUT`, `TBF_LOG_LEVEL`, ..), and a test reads its own
+  (`runtime_arg_value::<u32>("ROUNDS")`).
 - **SystemVerilog simulators** (a prototype): the same testbench, built
   with a `dpi` feature, runs on a SystemVerilog simulator through DPI,
   with a wrapper that passes it the signals at each edge. The adder's test
@@ -105,7 +112,6 @@ module regblock_test {
         tb.set_clock("clk", clk);
         tb.set_reset("rst", rst);
         tb.set_interface("bus", bus.master);
-        tb.set("rounds", 2);
         tb.start("RegTest");
         rst.assert(clk);
         clk.next(100000);
@@ -119,8 +125,8 @@ The [walkthrough](docs/walkthrough.md) reads a whole testbench,
 
 ## Getting started
 
-1. Build Veryl from PR #3701 and install it as `local`
-   (`verylup install local` in the Veryl repository).
+1. Build Veryl from the `tbf` branch of taichi-ishitani/veryl and install
+   it as `local` (`verylup install local` in the Veryl repository).
 2. Add a Rust crate for the testbench to the Veryl project, a `cdylib`
    depending on `veryl-tbf` and on `veryl-component` (the derives name
    it), from the same revision of Veryl:
@@ -131,7 +137,7 @@ The [walkthrough](docs/walkthrough.md) reads a whole testbench,
 
    [dependencies]
    veryl-tbf = { git = "https://github.com/taichi-ishitani/veryl-tbf" }
-   veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/component-method-ref-args" }
+   veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
    ```
 
    Fetching the git dependencies may need `CARGO_NET_GIT_FETCH_WITH_CLI=true`.
@@ -148,11 +154,16 @@ The [walkthrough](docs/walkthrough.md) reads a whole testbench,
 5. In a `#[test]` module, register the clocks, resets and interfaces, give
    options (`tb.option`) and settings (`tb.set`), and start a test by its
    registered name (`tb.start`).
-6. Run `veryl +local test`.
+6. Run `veryl +local test`. Runtime arguments override the test module:
+   `--runtime-arg=TBF_TESTNAME:<test>` starts another test, and
+   `--runtime-arg=TBF_<OPTION>:<value>` sets an option
+   (`TBF_LOG_LEVEL:debug`); a test reads its own with `runtime_arg_value`.
 
 ## Examples
 
-Each is a Veryl project run with `veryl +local test` in its directory.
+Each is a Veryl project run with `veryl +local test` in its directory;
+in `examples/regblock`, `make` runs its tests one after another, each named
+by a runtime argument.
 
 | Example | Shows |
 |---|---|

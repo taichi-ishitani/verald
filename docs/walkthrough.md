@@ -11,18 +11,23 @@ The example is a Veryl project:
 ```text
 examples/regblock/
 ├── Veryl.toml              the project, with the testbench as a component
-├── src/regblock.veryl      the DUT, its bus, and the #[test] modules
+├── Makefile                runs every test, one after another
+├── src/regblock.veryl      the DUT, its bus, and the #[test] module
 └── component/              the testbench: a Rust crate
     ├── Cargo.toml
     └── src/lib.rs
 ```
 
-Run it with `veryl +local test` in `examples/regblock`.
+Run it with `veryl +local test` in `examples/regblock`; the test and the
+options are given as runtime arguments
+(`--runtime-arg=TBF_TESTNAME:ReverseTest`, see section 2). `make` there
+runs every test, one after another (`make ReverseTest` one, `make SEED=5`
+with a seed, `make ARGS=..` with more arguments).
 
 ## Contents
 
 1. [The design under test](#1-the-design-under-test)
-2. [The test modules](#2-the-test-modules)
+2. [The test module](#2-the-test-module)
 3. [The testbench crate](#3-the-testbench-crate)
 4. [The bus VIP](#4-the-bus-vip)
 5. [Sequences](#5-sequences)
@@ -59,7 +64,7 @@ interface bus_if {
 the testbench some back-pressure to deal with, `ready` drops one cycle in
 three.
 
-## 2. The test modules
+## 2. The test module
 
 A test module instantiates the DUT and the testbench, `$comp::tbf_regblock`,
 the name the crate exports. Then, in `initial`, it tells the testbench
@@ -83,8 +88,6 @@ module regblock_test {
         tb.set_reset("rst", rst);
         tb.set_interface("bus", bus.master);    // the driver's side
         tb.set_interface("bus_mon", bus.monitor);
-        tb.option("timeout", 100000);           // the framework's options
-        tb.set("rounds", 2);                    // the test's settings
         tb.start("BasicTest");                  // the test, by its registered name
         rst.assert(clk);
         clk.next(100000);
@@ -95,18 +98,30 @@ module regblock_test {
 
 - The testbench finds signals by the names registered here, never by HDL
   paths: a component asks for `"clk"` or `"bus"`.
-- `option` sets the framework's options: `timeout`, `log_level` (`error`
-  .. `trace`, `info` by default), `max_errors`. `set` passes values to the
-  test, which reads them in its `setup`.
 - `start` builds the named test and starts its run. The test ends the
   simulation when it is done; the timeout and the trailing `$finish` are
   safety nets, and a `$finish` reached while the test still runs is
   reported as an unexpected finish.
 
-The file has three such modules, `regblock_test`, `regblock_reverse_test`
-and `regblock_random_test`, alike but for the test they start: `BasicTest`,
-`ReverseTest` and `RandomTest`. Each `#[test]` module is a test of
-`veryl test`, with a seed of its own.
+The module is the harness every test shares; which test runs, and the
+framework's options, are given when it runs, as runtime arguments, as
+UVM's `+UVM_*` plusargs:
+
+```text
+veryl +local test --runtime-arg=TBF_TESTNAME:ReverseTest --runtime-arg=TBF_TIMEOUT:100000
+```
+
+- `TBF_TESTNAME` names the test over the one given to `start`: the
+  testbench has `BasicTest`, `ReverseTest` and `RandomTest`; `BasicTest`
+  runs when none is named.
+- `TBF_<OPTION>` sets an option of the framework: `TBF_TIMEOUT` (the time
+  the test must end by), `TBF_LOG_LEVEL` (`error` .. `trace`, `info` by
+  default), `TBF_MAX_ERRORS`. A test module may also give options with
+  `tb.option(key, value)`; a runtime argument overrides it.
+- A misspelt one (`TBF_LOG_LEVL`) fails the test, listing the options.
+- Arguments without the prefix are the tests' own: `ROUNDS:4` sets how
+  many times `BasicTest` writes and reads every register (2 by default;
+  see [section 7](#7-the-base-test)).
 
 ## 3. The testbench crate
 
@@ -126,7 +141,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 veryl-tbf = { path = "../../../crates/veryl-tbf" }
-veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/component-method-ref-args" }
+veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
 ```
 
 `src/lib.rs` imports the prelude, and at its end registers the tests and
@@ -583,9 +598,9 @@ what every test does before and after its scenario; each test is made
 from it with a scenario of its own.
 
 A test is the root of the hierarchy. It is made in two steps, its
-configuration (`setup`, from the settings) and its hierarchy (`build`,
-from that configuration), and runs in three, `pre_run`, `run` and
-`post_run`. The base test `RegTest` writes all but `run`:
+configuration (`setup`, from the settings and the runtime arguments) and
+its hierarchy (`build`, from that configuration), and runs in three,
+`pre_run`, `run` and `post_run`. The base test `RegTest` writes all but `run`:
 
 ```rust
 pub struct RegTestConfig {
@@ -604,8 +619,8 @@ pub struct RegTest {
 impl Component for RegTest {
     type Context = RegTestConfig;
 
-    fn setup(setup_context: &mut SetupContext) -> Result<RegTestConfig, TestError> {
-        Ok(RegTestConfig { rounds: setup_context.get("rounds")? })   // tb.set("rounds", 2)
+    fn setup(_setup_context: &mut SetupContext) -> Result<RegTestConfig, TestError> {
+        Ok(RegTestConfig { rounds: runtime_arg_value("ROUNDS")?.unwrap_or(2) })   // --runtime-arg=ROUNDS:4
     }
 
     fn build(scope: &Scope, config: RegTestConfig) -> Result<Self, TestError> {
@@ -649,8 +664,11 @@ impl Component for RegTest {
 - The sequencer handle is taken from the agent right after it is made, and
   kept typed. A sequence started on a handle left unconnected stops the
   test with a message naming the sequence.
-- `setup_context.get("rounds")` converts the setting to the field's type,
-  and fails the start if it is missing.
+- `runtime_arg_value("ROUNDS")` reads the runtime argument as the field's
+  type, `None` if it was not given; a value that does not convert (`ROUNDS:x`,
+  or one beyond `u16`) fails the start, naming the argument. A test module
+  could pass the value instead (`tb.set("rounds", 2)`, read with
+  `setup_context.get("rounds")?`); this one leaves all to run time.
 
 A simple test may instead write its `run` too, without `base`, and be
 registered as it is.
@@ -770,8 +788,8 @@ time.
 
 ## 10. Running and reading the output
 
-`veryl +local test` builds the crate, then runs each `#[test]` module
-(possibly in parallel, so their lines interleave). For `BasicTest`:
+`veryl +local test` builds the crate, then runs the `#[test]` module. For
+`BasicTest`:
 
 ```text
 [INFO ]    Executing test (regblock_test)
@@ -786,8 +804,10 @@ time.
   test's name for the test itself).
 - The report summary gives the test, its seed, the end time, and the
   count of messages of each severity, including those not printed.
-- With `tb.option("log_level", "debug")`, the hierarchy is printed when the
-  test starts:
+- The summary also lists the runtime arguments given, when there are
+  some, so a log shows how its run was made.
+- With `--runtime-arg=TBF_LOG_LEVEL:debug`, the hierarchy is printed when
+  the test starts:
 
   ```text
   [tb] cycle 0: DEBUG @ 0 BasicTest: hierarchy:

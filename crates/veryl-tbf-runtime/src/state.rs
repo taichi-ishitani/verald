@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use veryl_component::{InputPort, ModportRef, OutputPort, Value};
+use veryl_component::{InputPort, ModportRef, OutputPort, RuntimeArg, Value};
 
 use crate::TestError;
 use crate::executor::TaskId;
@@ -47,6 +47,8 @@ pub(crate) struct State {
     pub(crate) inputs: Vec<(String, InputPort)>,
     pub(crate) outputs: Vec<(String, OutputPort)>,
     pub(crate) settings: Vec<Setting>,
+    /// The runtime arguments, taken at `start`.
+    pub(crate) runtime_args: Vec<RuntimeArg>,
     /// The time the run phase must end by.
     pub(crate) timeout: Option<u64>,
     pub(crate) main: Option<TaskId>,
@@ -71,6 +73,7 @@ impl State {
             inputs: Vec::new(),
             outputs: Vec::new(),
             settings: Vec::new(),
+            runtime_args: Vec::new(),
             timeout: None,
             main: None,
             main_done: false,

@@ -9,6 +9,7 @@
 
 #![allow(async_fn_in_trait)]
 
+pub mod args;
 pub mod clocking;
 mod concurrency;
 mod error;
@@ -19,6 +20,10 @@ pub mod sim;
 mod state;
 mod sync;
 
+pub use args::{
+    ArgError, ArgValue, RuntimeArg, runtime_arg, runtime_arg_exists, runtime_arg_value,
+    runtime_args,
+};
 pub use clocking::{Clocking, ClockingPaths, ClockingTimeout, SignalValue, Signals};
 pub use concurrency::{Either, ForkScope, first, fork_scope, join, try_join, yield_now};
 pub use error::TestError;
@@ -34,10 +39,11 @@ pub use veryl_tbf_macros::{
 /// The names a testbench usually needs.
 pub mod prelude {
     pub use crate::{
-        Clock, Clocking, ClockingPaths, ClockingTimeout, Either, Event, Fifo, ForkScope, Reset,
-        SignalValue, Signals, Start, TestError, Testbench, changed, changed_within, clocking, edge,
-        edge_within, first, fork_scope, join, modport, negedge, negedge_within, posedge,
-        posedge_within, run_with_reset, tick, tick_until, tick_until_within, tick_while,
+        ArgValue, Clock, Clocking, ClockingPaths, ClockingTimeout, Either, Event, Fifo, ForkScope,
+        Reset, SignalValue, Signals, Start, TestError, Testbench, changed, changed_within,
+        clocking, edge, edge_within, first, fork_scope, join, modport, negedge, negedge_within,
+        posedge, posedge_within, run_with_reset, runtime_arg, runtime_arg_exists,
+        runtime_arg_value, runtime_args, tick, tick_until, tick_until_within, tick_while,
         tick_while_within, try_join,
     };
 }

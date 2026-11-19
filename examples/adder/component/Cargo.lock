@@ -74,6 +74,7 @@ checksum = "93e7820bc0a80a0238e650327316f929ba18d5be054b647490a3a6a339f3e7c0"
 dependencies = [
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -271,9 +272,10 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "veryl-component"
 version = "0.1.2"
-source = "git+https://github.com/taichi-ishitani/veryl?branch=feat%2Fcomponent-method-ref-args#e1bd998300344cb45130b32a3d05b2d8d3db4738"
+source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#1e4496f7d52522cf08cfa50463ec2e4e5f4db269"
 dependencies = [
  "anyhow",
+ "num-bigint",
  "smallvec",
  "veryl-component-macros",
  "veryl-component-sys",
@@ -282,7 +284,7 @@ dependencies = [
 [[package]]
 name = "veryl-component-macros"
 version = "0.1.2"
-source = "git+https://github.com/taichi-ishitani/veryl?branch=feat%2Fcomponent-method-ref-args#e1bd998300344cb45130b32a3d05b2d8d3db4738"
+source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#1e4496f7d52522cf08cfa50463ec2e4e5f4db269"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -292,7 +294,7 @@ dependencies = [
 [[package]]
 name = "veryl-component-sys"
 version = "0.1.2"
-source = "git+https://github.com/taichi-ishitani/veryl?branch=feat%2Fcomponent-method-ref-args#e1bd998300344cb45130b32a3d05b2d8d3db4738"
+source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#1e4496f7d52522cf08cfa50463ec2e4e5f4db269"
 
 [[package]]
 name = "veryl-tbf-dpi"

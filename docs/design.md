@@ -1388,14 +1388,14 @@ Decided:
 Decided:
 
 - One test per simulation, as in UVM. With Veryl's simulator the test is
-  chosen in the Veryl test module, by name, as the argument of `start`:
-  `tb.start("RegTest")`. Veryl has no way to run one `#[test]` module in
-  several variants or to pass arguments from `veryl test` into the
-  simulation (only `--seed` reaches it, and `$test$plusargs` is not
-  supported), so each test has a `#[test]` module of its own, kept thin: a
-  shared harness module holds the clocks, resets, DUT and testbench and
-  their connections; the test module instantiates it and names the test.
-  (heliodor's ISA tests are written the same way, one module per program.)
+  named in the Veryl test module, as the argument of `start`
+  (`tb.start("RegTest")`), and the runtime argument `TBF_TESTNAME`
+  overrides it, as UVM's `+UVM_TESTNAME` does `run_test`'s (see "Runtime
+  arguments" below). So one `#[test]` module, the harness every test
+  shares, runs any test: `examples/regblock` has one, its tests and
+  options given at run time. A test module of its own per test (a thin
+  module naming the test, over a shared harness module) remains possible,
+  for a fixed list that `veryl test` runs at once.
 - The name is given as a method argument, not a component parameter, so
   that the harness is the same in every test: `veryl test` builds a
   component that recurs across tests once and reuses it in the others
@@ -1456,9 +1456,9 @@ Decided:
   (9200 s) means unlimited too. Without one, the test module's bound on its
   clock ends the simulation as an unexpected finish, which, like a timeout,
   lists the tasks still alive by their components' paths.
-- Settings are given where UVM gives plusargs, since Veryl passes no
-  arguments into a simulation: the Veryl test module (the shared harness)
-  calls methods before `start`, as often as needed. The framework's
+- Settings are given by the Veryl test module (the shared harness), which
+  calls methods before `start`, as often as needed; runtime arguments
+  override them where UVM's plusargs would (below). The framework's
   options and the testbench's own settings are apart, as UVM's `+UVM_*`
   plusargs are from a testbench's own:
 
@@ -1500,6 +1500,36 @@ Decided:
   - Values are assigned on the Veryl side, so Veryl is their source; one
     value per `set` is the way until Veryl can hand its types to Rust (see
     [TODO](#todo)).
+
+- Runtime arguments (`veryl test --runtime-arg=..`, Veryl's plusargs;
+  see [veryl-proposals.md](veryl-proposals.md#arguments-into-a-simulation))
+  override the test module, as UVM's `+UVM_*` plusargs do `run_test` and
+  the testbench's own settings:
+
+  ```
+  veryl +local test -t regblock_test --runtime-arg=TBF_TESTNAME:ReverseTest --runtime-arg=TBF_LOG_LEVEL:debug
+  ```
+
+  - The runtime takes a copy of them at `start`; they do not change during
+    the run.
+  - Its own are under the `TBF_` prefix, in upper case as UVM's:
+    `TBF_TESTNAME:<name>` names the test over the name given to `start`
+    (UVM's `+UVM_TESTNAME`), and any other `TBF_<KEY>:<value>` is the option
+    `<key>` in lower case (`TBF_TIMEOUT`, `TBF_LOG_LEVEL`, a testbench's
+    own), taken in the order given after the test module's, so the command
+    line wins and the last of a name wins. An unknown key, or one given as
+    a flag, fails the start as `tb.option` would: a misspelt one is not
+    ignored. A value reads as an integer if it is one, otherwise as a
+    string. `testname` is not an option's name.
+  - No prefix overrides settings (`tb.set`): a test reads its own arguments
+    instead, typed, from anywhere and without a context, as UVM's command
+    line processor is reached: `runtime_arg_value::<u32>("ROUNDS")?`
+    (`None` if not given; an error naming the argument if it is a flag or
+    does not convert), `runtime_arg_exists`, `runtime_arg` (the value, flag
+    or text) and `runtime_args` (all, as given). The conversion is the
+    SDK's `TryFrom<&ArgValue>`, so a testbench can read its own types.
+  - The report's summary lists the arguments given, beside the seed, so a
+    log shows how its run was made.
 
   Only this is implemented at first. Setting the options from the
   testbench's code (in a test's `setup` or a spec's `pre_build`, UVM's
@@ -1680,11 +1710,6 @@ None at present; deferred work is under [TODO](#todo).
   run phase (UVM's `set_drain_time`), in time or in clock edges. Not needed
   yet. (The case it solves: a monitor publishing the last transfer at the
   edge after the sequence has its response.)
-
-- Choosing the test at run time (`+UVM_TESTNAME`), once Veryl passes
-  arguments into a simulation (see
-  [veryl-proposals.md](veryl-proposals.md#arguments-into-a-simulation)):
-  the runner would take the test's name, and the options, from them.
 
 - Ports put in by the attribute: a driver's `#[seq_item_port]` and a
   monitor's `#[analysis_port]` fields are always the same shape, but the

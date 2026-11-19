@@ -406,6 +406,21 @@ unsafe extern "C" fn api_write_output_bits(
     0
 }
 
+// Runtime arguments: none yet. Taking them from the SystemVerilog
+// simulator's plusargs is left for later.
+unsafe extern "C" fn api_runtime_arg_count(_: *mut sys::VrlCtx) -> u32 {
+    0
+}
+
+unsafe extern "C" fn api_runtime_arg_text(
+    _: *mut sys::VrlCtx,
+    _idx: u32,
+    _buf: *mut u8,
+    _cap: usize,
+) -> i64 {
+    -1
+}
+
 static API: sys::VrlHostApi = sys::VrlHostApi {
     size: size_of::<sys::VrlHostApi>(),
     port_index: api_port_index,
@@ -431,6 +446,9 @@ static API: sys::VrlHostApi = sys::VrlHostApi {
     port_direct: api_port_direct,
     port_desc: api_port_desc,
     write_output_bits: api_write_output_bits,
+    runtime_arg_count: api_runtime_arg_count,
+    runtime_arg_name: api_runtime_arg_text,
+    runtime_arg_value: api_runtime_arg_text,
 };
 
 // ---------------------------------------------------------------------------
@@ -521,10 +539,7 @@ pub fn init(
         let mut signal_maps = HashMap::new();
         for entry in &table.signal_map {
             let Some(layout) = table.layout.get(&entry.layout) else {
-                print(&format!(
-                    "no layout `{}` in the table",
-                    entry.layout
-                ));
+                print(&format!("no layout `{}` in the table", entry.layout));
                 return 1;
             };
             let mut signal_map = SignalMap {
@@ -710,9 +725,7 @@ pub fn set_signal_map(method: &str, name: *const c_char, key: i32) -> i32 {
         let Some(host) = host_ptr() else { return 1 };
         let Some(arg) = (unsafe { (*host).signal_maps.get(&key) }).map(|i| ref_of(i.kind, &i.all))
         else {
-            print(&format!(
-                "`{method}`: no signal_map {key} in the table"
-            ));
+            print(&format!("`{method}`: no signal_map {key} in the table"));
             return 1;
         };
         call(method, vec![Arg::Str(c_str(name).to_string()), arg])

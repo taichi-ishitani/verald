@@ -152,8 +152,8 @@ pub(crate) fn message(severity: Severity, path: &str, text: fmt::Arguments<'_>) 
     }
 }
 
-/// Logs the report summary, as UVM's: the counts, and a fatal error if one
-/// ended the run.
+/// Logs the report summary, as UVM's: the runtime arguments given, the
+/// counts, and a fatal error if one ended the run.
 pub(crate) fn summary(test: &str, seed: u64, fatal: Option<(&str, &TestError)>) {
     let counts = REPORT.with(|r| r.borrow().counts);
     let counted: Vec<String> = Severity::ALL
@@ -164,6 +164,13 @@ pub(crate) fn summary(test: &str, seed: u64, fatal: Option<(&str, &TestError)>) 
         "--- report summary: test {test}, seed {seed}, ended at {} ---",
         sim::time()
     ));
+    let runtime_args = veryl_tbf_runtime::runtime_args();
+    if !runtime_args.is_empty() {
+        sim::log(&format!(
+            "runtime arguments: {}",
+            veryl_tbf_runtime::args::format(&runtime_args)
+        ));
+    }
     sim::log(&counted.join(", "));
     if let Some((owner, error)) = fatal {
         sim::log(&format!("fatal: {owner}: {error}"));

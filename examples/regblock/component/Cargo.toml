@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 veryl-tbf = { path = "../../../crates/veryl-tbf" }
 # The component derives refer to `::veryl_component`; the same revision as
 # the runtime's.
-veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/component-method-ref-args" }
+veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
 
 # Standalone package.
 [workspace]

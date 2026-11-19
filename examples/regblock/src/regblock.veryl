@@ -73,7 +73,13 @@ module regblock (
     }
 }
 
-/// Runs the testbench's `BasicTest` against the register block.
+/// Runs a test of the testbench against the register block. The test, the
+/// options and the test's values are given at run time, as runtime
+/// arguments:
+///
+///     veryl +local test --runtime-arg=TBF_TESTNAME:ReverseTest --runtime-arg=ROUNDS:4
+///
+/// `BasicTest` runs when none is named, for 2 rounds.
 #[test(regblock_test)]
 module regblock_test {
     inst clk: $tb::clock_gen;
@@ -91,61 +97,7 @@ module regblock_test {
         tb.set_reset("rst", rst);
         tb.set_interface("bus", bus.master);
         tb.set_interface("bus_mon", bus.monitor);
-        tb.option("timeout", 100000);
-        tb.set("rounds", 2);
         tb.start("BasicTest");
-        rst.assert(clk);
-        clk.next(100000);
-        $finish();
-    }
-}
-
-#[test(regblock_reverse_test)]
-module regblock_reverse_test {
-    inst clk: $tb::clock_gen;
-    inst rst: $tb::reset_gen (clk);
-    inst bus: bus_if;
-    inst dut: regblock (
-        i_clk: clk       ,
-        i_rst: rst       ,
-        bus  : bus.slave ,
-    );
-    inst tb : $comp::tbf_regblock;
-
-    initial {
-        tb.set_clock("clk", clk);
-        tb.set_reset("rst", rst);
-        tb.set_interface("bus", bus.master);
-        tb.set_interface("bus_mon", bus.monitor);
-        tb.option("timeout", 100000);
-        tb.set("rounds", 2);
-        tb.start("ReverseTest");
-        rst.assert(clk);
-        clk.next(100000);
-        $finish();
-    }
-}
-
-#[test(regblock_random_test)]
-module regblock_random_test {
-    inst clk: $tb::clock_gen;
-    inst rst: $tb::reset_gen (clk);
-    inst bus: bus_if;
-    inst dut: regblock (
-        i_clk: clk       ,
-        i_rst: rst       ,
-        bus  : bus.slave ,
-    );
-    inst tb : $comp::tbf_regblock;
-
-    initial {
-        tb.set_clock("clk", clk);
-        tb.set_reset("rst", rst);
-        tb.set_interface("bus", bus.master);
-        tb.set_interface("bus_mon", bus.monitor);
-        tb.option("timeout", 100000);
-        tb.set("rounds", 2);
-        tb.start("RandomTest");
         rst.assert(clk);
         clk.next(100000);
         $finish();

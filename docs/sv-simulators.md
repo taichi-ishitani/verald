@@ -280,6 +280,8 @@ What the prototype leaves out:
 
 - Settings and options are 64-bit integers only (no strings, nothing
   wider).
+- Runtime arguments: the host gives none. Taking them from the
+  simulator's plusargs (`+TBF_TESTNAME=..`) is left for later.
 - The host services a testbench of veryl-tbf does not use are empty: files,
   traces and parameters.
 - One testbench per simulation: one host, one `tbf_init`.

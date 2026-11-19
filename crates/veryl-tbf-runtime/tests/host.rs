@@ -78,6 +78,21 @@ impl Testbench for Tests {
                     Ok(())
                 });
             }
+            "runtime_args" => {
+                let rounds: u32 = runtime_arg_value("ROUNDS")?.unwrap_or(2);
+                let mode: String = runtime_arg_value("MODE")?.unwrap_or_default();
+                log(format!(
+                    "rounds {rounds}, mode {mode}, verbose {}, given {}",
+                    runtime_arg_exists("VERBOSE"),
+                    runtime_args().len()
+                ));
+                start.main("test", async {
+                    let flag = runtime_arg("VERBOSE").is_some_and(|value| value.is_flag());
+                    log(format!("flag {flag}"));
+                    runtime_arg_value::<u8>("ROUNDS")?;
+                    Ok(())
+                });
+            }
             "settings" => {
                 let n = start
                     .setting("num_masters")
@@ -182,8 +197,13 @@ fn str(s: &str) -> Value {
 
 /// A simulator with a clock `clk` and a reset `rst` registered.
 fn setup() -> (MockSim, Tb) {
+    setup_with(|sim| sim)
+}
+
+/// `setup`, the simulator given runtime arguments by `args`.
+fn setup_with(args: impl FnOnce(MockSim) -> MockSim) -> (MockSim, Tb) {
     take_log();
-    let mut sim = MockSim::new();
+    let mut sim = args(MockSim::new());
     let mut tb = sim.build::<Tb>().unwrap();
     sim.init(&mut tb).unwrap();
     let clk = sim.clock_ref("clk");
@@ -363,4 +383,89 @@ fn a_panic_poisons_the_runtime() {
     clock(&mut sim, &mut tb, 1);
     sim.finish(&mut tb).unwrap();
     assert!(!sim.failed(), "{:?}", sim.failures());
+}
+
+#[test]
+fn a_test_reads_runtime_arguments() {
+    let (mut sim, mut tb) = setup_with(|sim| {
+        sim.runtime_arg("ROUNDS", "8")
+            .runtime_flag("VERBOSE")
+            .runtime_arg("MODE", "fast")
+            .runtime_arg("ROUNDS", "0x200")
+    });
+    sim.call(&mut tb, "start", &[str("runtime_args")]).unwrap();
+    assert_eq!(
+        take_log(),
+        ["rounds 512, mode fast, verbose true, given 4", "flag true"]
+    );
+    // 512 does not fit `u8`: the main task fails with the argument's name.
+    assert_eq!(sim.failures().len(), 1);
+    assert!(
+        sim.failures()[0].contains("runtime argument `ROUNDS`: value `0x200` does not fit"),
+        "{:?}",
+        sim.failures()
+    );
+}
+
+#[test]
+fn tbf_testname_overrides_the_test_given_to_start() {
+    let (mut sim, mut tb) = setup_with(|sim| sim.runtime_arg("TBF_TESTNAME", "three_edges"));
+    sim.call(&mut tb, "start", &[str("forever")]).unwrap();
+    clock(&mut sim, &mut tb, 3);
+    assert_eq!(take_log(), ["edges 3"]);
+    assert!(sim.finish_requested());
+}
+
+#[test]
+fn tbf_options_override_the_test_module() {
+    let (mut sim, mut tb) = setup_with(|sim| sim.runtime_arg("TBF_TIMEOUT", "5"));
+    sim.call(&mut tb, "option", &[str("timeout"), Value::from(100u64)])
+        .unwrap();
+    sim.call(&mut tb, "start", &[str("forever")]).unwrap();
+    sim.time = 5;
+    clock(&mut sim, &mut tb, 1);
+    assert_eq!(
+        sim.failures(),
+        ["fatal: timeout at time 5; tasks alive: env.monitor, test"]
+    );
+}
+
+#[test]
+fn tbf_options_reach_the_testbench() {
+    let (mut sim, mut tb) = setup_with(|sim| sim.runtime_arg("TBF_VERBOSE", "1"));
+    sim.call(&mut tb, "start", &[str("three_edges")]).unwrap();
+    let (mut sim, mut tb) = setup_with(|sim| sim.runtime_arg("TBF_VERBOSE", "on"));
+    let error = sim
+        .call(&mut tb, "start", &[str("three_edges")])
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("runtime argument `TBF_VERBOSE`: option `verbose`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn unknown_and_valueless_tbf_options_fail_the_start() {
+    let (mut sim, mut tb) = setup_with(|sim| sim.runtime_arg("TBF_TIMOUT", "5"));
+    let error = sim
+        .call(&mut tb, "start", &[str("three_edges")])
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("runtime argument `TBF_TIMOUT`: unknown option `timout`"),
+        "{error}"
+    );
+    let (mut sim, mut tb) = setup_with(|sim| sim.runtime_flag("TBF_TIMEOUT"));
+    let error = sim
+        .call(&mut tb, "start", &[str("three_edges")])
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("runtime argument `TBF_TIMEOUT`: an option takes a value"),
+        "{error}"
+    );
 }

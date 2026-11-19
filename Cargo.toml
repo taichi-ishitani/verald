@@ -16,4 +16,4 @@ veryl-tbf-macros = { path = "crates/veryl-tbf-macros" }
 veryl-tbf-random = { path = "crates/veryl-tbf-random" }
 veryl-tbf-runtime = { path = "crates/veryl-tbf-runtime" }
 # Method reference arguments are not released yet (veryl-lang/veryl#3701).
-veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/component-method-ref-args" }
+veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }

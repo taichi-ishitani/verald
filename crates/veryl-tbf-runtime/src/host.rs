@@ -17,6 +17,12 @@
 //!     $finish();
 //! }
 //! ```
+//!
+//! Runtime arguments (`veryl test --runtime-arg=..`) under the `TBF_`
+//! prefix override the test module, as UVM's `+UVM_` plusargs:
+//! `TBF_TESTNAME:<name>` the test given to `start`, and `TBF_<KEY>:<value>`
+//! the option `<key>` (in lower case), applied at `start` after the test
+//! module's.
 
 use std::future::Future;
 use std::rc::Rc;
@@ -26,6 +32,7 @@ use veryl_component::{
 };
 
 use crate::TestError;
+use crate::args::{self, ArgValue};
 use crate::executor::{self, Polled};
 use crate::signals::{Clock, ClockState, Reset, ResetState};
 use crate::sim::{self, HookGuard};
@@ -37,8 +44,10 @@ type HookResult = veryl_component::Result<()>;
 /// a test. `veryl-tbf`'s methodology implements it; a testbench on the
 /// runtime alone may too.
 pub trait Testbench: 'static {
-    /// Takes an option the runtime does not know (`tb.option(key, value)`).
-    /// Returns `Ok(false)` for a key it does not know either.
+    /// Takes an option the runtime does not know (`tb.option(key, value)`,
+    /// or the runtime argument `TBF_<KEY>:<value>`). Returns `Ok(false)` for
+    /// a key it does not know either. `testname` is not an option: its
+    /// runtime argument names the test.
     fn option(_key: &str, _value: &Value) -> Result<bool, TestError> {
         Ok(false)
     }
@@ -524,14 +533,19 @@ pub fn set_output(_ctx: &mut SimCtx, name: String, sig: OutputPort) -> HookResul
 /// at once.
 pub fn option<T: Testbench>(_ctx: &mut SimCtx, key: String, value: Value) -> HookResult {
     in_setup("option")?;
+    take_option::<T>(&key, &value).map_err(|e| veryl_component::anyhow!("{e}"))
+}
+
+/// Takes an option, from the test module or from a runtime argument.
+fn take_option<T: Testbench>(key: &str, value: &Value) -> Result<(), TestError> {
     if key == "timeout" {
         let time = value
             .as_u64()
-            .map_err(|e| veryl_component::anyhow!("option `timeout`: {e}"))?;
+            .map_err(|e| TestError::new(format!("option `timeout`: {e}")))?;
         with_state(|s| s.timeout = Some(time));
         return Ok(());
     }
-    match T::option(&key, &value) {
+    match T::option(key, value) {
         Ok(true) => Ok(()),
         Ok(false) => {
             let known: Vec<String> = RUNTIME_OPTIONS
@@ -539,9 +553,42 @@ pub fn option<T: Testbench>(_ctx: &mut SimCtx, key: String, value: Value) -> Hoo
                 .map(|(k, desc)| format!("`{k}` ({desc})"))
                 .chain(T::options())
                 .collect();
-            bail!("unknown option `{key}`; known: {}", known.join(", "))
+            Err(TestError::new(format!(
+                "unknown option `{key}`; known: {}",
+                known.join(", ")
+            )))
         }
-        Err(e) => bail!("option `{key}`: {e}"),
+        Err(e) => Err(TestError::new(format!("option `{key}`: {e}"))),
+    }
+}
+
+/// Takes the runtime arguments, and the options among them (`TBF_<KEY>`),
+/// in the order given, so the last of a name wins. Returns the test's name
+/// from `TBF_TESTNAME`, if given.
+fn take_runtime_args<T: Testbench>(ctx: &SimCtx) -> Result<Option<String>, TestError> {
+    let runtime_args = ctx.runtime_args().to_vec();
+    with_state(|s| s.runtime_args = runtime_args.clone());
+    for arg in &runtime_args {
+        let Some(key) = arg.name.strip_prefix(args::PREFIX) else {
+            continue;
+        };
+        if arg.name == args::TESTNAME {
+            continue;
+        }
+        let value = match &arg.value {
+            ArgValue::Flag => return Err(args::error(&arg.name, &"an option takes a value")),
+            ArgValue::Text(text) => match u64::try_from(&arg.value) {
+                Ok(n) => Value::from(n),
+                Err(_) => Value::from(text.as_str()),
+            },
+        };
+        take_option::<T>(&key.to_lowercase(), &value).map_err(|e| args::error(&arg.name, &e))?;
+    }
+    match args::find(&runtime_args, args::TESTNAME) {
+        None => Ok(None),
+        Some(value) => String::try_from(value)
+            .map(Some)
+            .map_err(|e| args::error(args::TESTNAME, &e)),
     }
 }
 
@@ -562,9 +609,14 @@ pub fn set(_ctx: &mut SimCtx, key: String, value: Value) -> HookResult {
 }
 
 /// `start(test)`: starts the test, as UVM's `run_test`, and runs its tasks
-/// up to their first waits (time 0).
+/// up to their first waits (time 0). The runtime arguments are taken first:
+/// `TBF_TESTNAME` names the test over `test`, and `TBF_<KEY>` sets options.
 pub fn start<T: Testbench>(ctx: &mut SimCtx, test: String) -> HookResult {
     in_setup("start")?;
+    let test = match take_runtime_args::<T>(ctx) {
+        Ok(name) => name.unwrap_or(test),
+        Err(error) => bail!("{error}"),
+    };
     let Some(_guard) = enter(ctx) else {
         return Ok(());
     };

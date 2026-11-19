@@ -402,9 +402,9 @@ pub struct RegTest {
 impl Component for RegTest {
     type Context = RegTestConfig;
 
-    fn setup(setup_context: &mut SetupContext) -> Result<RegTestConfig, TestError> {
+    fn setup(_setup_context: &mut SetupContext) -> Result<RegTestConfig, TestError> {
         Ok(RegTestConfig {
-            rounds: setup_context.get("rounds")?,
+            rounds: runtime_arg_value("ROUNDS")?.unwrap_or(2),
         })
     }
 

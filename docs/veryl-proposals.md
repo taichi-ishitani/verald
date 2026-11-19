@@ -23,7 +23,9 @@ The proposals refer to Veryl as of
 
 ## Arguments into a simulation
 
-Filed as [veryl-lang/veryl#3716](https://github.com/veryl-lang/veryl/issues/3716).
+Filed as [veryl-lang/veryl#3716](https://github.com/veryl-lang/veryl/issues/3716),
+and implemented in [veryl-lang/veryl#3717](https://github.com/veryl-lang/veryl/pull/3717),
+which veryl-tbf uses (see "Runtime arguments" in [design.md](design.md)).
 
 So that values can be chosen when a test is run, not when it is written:
 which test to run (UVM's `+UVM_TESTNAME`), how many rounds, a verbosity.
@@ -33,8 +35,8 @@ this; `veryl test` has no way to pass values into a simulation.
 A file the testbench reads is no substitute today: reads resolve against
 the project root, shared by every test (only writes go to a per-test
 directory, `target/veryl-components/out/<test>`), and a component cannot
-learn its test's name. Until then each test has a `#[test]` module of its
-own, which starts it by name.
+learn its test's name. So each test had a `#[test]` module of its own,
+which started it by name.
 
 ### The command line
 
