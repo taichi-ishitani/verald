@@ -1147,9 +1147,10 @@ users see follows rustdv-veryl's clocking blocks:
   `scope.clocking_with("clk", CbPaths { .. })?` (the block's type following
   from its paths' type); `new` remains for a clock given as a `Clock`.
   Widths are checked
-  against the fields' types at construction. Until a Veryl clocking
-  declaration can say which clock a block follows (see [TODO](#todo)), the
-  clock is given here.
+  against the fields' types at construction. Clocking stays on the
+  component's side, not in Veryl (see
+  [veryl-proposals.md](veryl-proposals.md#clocking-blocks-as-a-language-feature-a-study)),
+  so the clock is given here.
 - Field types implement `SignalValue`: `bool`, the unsigned integers up to
   `u128`, `BigUint` (any width), and `Value` (the bits as they are); every
   type but `Value` reads X and Z as 0, as SystemVerilog's conversion to
@@ -1704,7 +1705,7 @@ None at present; deferred work is under [TODO](#todo).
   fixed, readable form (UVM's table printer, for logs), and recording
   for a waveform or a transaction database. Packing to bits is the
   component SDK's (see
-  [veryl-proposals.md](veryl-proposals.md#types-defined-by-a-components-crate-usable-in-veryl)).
+  [veryl-proposals.md](veryl-proposals.md#rust-types-generated-from-veryl-packages)).
   Not needed yet.
 
 The UVM features left for later are listed under
