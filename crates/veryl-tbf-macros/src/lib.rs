@@ -96,12 +96,13 @@ pub fn sequence(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Marks a sequence item (an item, or a monitor's transaction, shared as an
-/// `ItemHandle`) and defines its handle's alias: `#[derive(SequenceItem)]
-/// struct BusItem` adds `type BusItemHandle = ItemHandle<BusItem>`, as
-/// visible as the item; `#[sequence_item(handle = Name)]` names it otherwise.
-#[proc_macro_derive(SequenceItem, attributes(sequence_item))]
-pub fn sequence_item(input: TokenStream) -> TokenStream {
-    expand(component::sequence_item(input.into()))
+/// `ItemHandle`) and defines its handle's alias: `#[sequence_item] struct
+/// BusItem` adds `type BusItemHandle = ItemHandle<BusItem>`, as visible as
+/// the item; `#[sequence_item(handle = Name)]` names it otherwise. The struct
+/// is left as it is.
+#[proc_macro_attribute]
+pub fn sequence_item(attr: TokenStream, item: TokenStream) -> TokenStream {
+    expand(component::sequence_item(attr.into(), item.into()))
 }
 
 /// Registers a test, which the test module starts by name

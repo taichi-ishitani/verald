@@ -669,11 +669,15 @@ between a sequence, its driver and the monitors' subscribers:
 - An item is a plain struct of the user's (`#[derive(Clone, Debug)]`); what
   the framework records about it (its sequence and transaction ids, its
   begin and end) lives in the handle, so items need no macro.
-  `#[derive(SequenceItem)]` only adds the alias of its handle,
+  `#[sequence_item]` only adds the alias of its handle,
   `type BusItemHandle = ItemHandle<BusItem>` (`<Name>Handle`, or
   `#[sequence_item(handle = Name)]`), as visible as the item, for the
-  ports and subscribers that name it (`AnalysisPort<BusItemHandle>`). It
-  is named for what it marks, as UVM's `uvm_sequence_item` covers both a
+  ports and subscribers that name it (`AnalysisPort<BusItemHandle>`),
+  leaving the struct as it is. It is an attribute, not a derive, as the
+  framework's other marks are (`#[component]`, `#[sequence]`,
+  `#[clocking]`, `#[randomize]`), though a derive is Rust's usual form
+  for what changes nothing: one form for the framework's marks reads
+  better beside them. It is named for what it marks, as UVM's `uvm_sequence_item` covers both a
   sequence's items and a monitor's transactions, and does that only. UVM's
   `uvm_object_utils` (printing, comparing, copying) is Rust's `Debug`,
   `PartialEq` and `Clone`; something all objects share (configurations
@@ -1746,7 +1750,7 @@ None at present; deferred work is under [TODO](#todo).
 
 - Utility macros for objects, as UVM's `uvm_object_utils` and its field
   macros (`uvm_field_*`): a derive for every kind of object
-  (configurations, sequences, items), apart from `SequenceItem`, which
+  (configurations, sequences, items), apart from `#[sequence_item]`, which
   only marks items. Rust's `Debug`, `PartialEq` and `Clone` cover
   printing, comparing and copying today; what such a derive would add is
   what they cannot: per-field policies (a field left out of a comparison

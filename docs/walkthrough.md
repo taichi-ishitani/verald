@@ -176,7 +176,8 @@ number the configuration gives:
 
 ```rust
 #[randomize(context = BusConfig)]
-#[derive(Clone, Debug, Default, SequenceItem)]
+#[sequence_item]
+#[derive(Clone, Debug, Default)]
 pub struct BusItem {
     #[rand] pub write: bool,
     #[rand] pub addr: u8,
@@ -195,7 +196,7 @@ impl BusItem {
 or a constructor of its own (`BusItem::new(write, addr, data)`), not with
 a literal.
 
-`#[derive(SequenceItem)]` adds the alias of the item's handle,
+`#[sequence_item]` adds the alias of the item's handle,
 `BusItemHandle` (`ItemHandle<BusItem>`): items are shared between the
 sequence, the driver and the monitor's subscribers as handles, and the
 ports and subscribers below name it.

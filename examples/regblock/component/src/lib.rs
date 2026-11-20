@@ -17,7 +17,8 @@ use veryl_tbf::runtime::run_with_reset;
 /// monitor) fills in. Random under the agent's configuration, which bounds
 /// the address.
 #[randomize(context = BusConfig)]
-#[derive(Clone, Debug, Default, SequenceItem)]
+#[sequence_item]
+#[derive(Clone, Debug, Default)]
 pub struct BusItem {
     #[rand]
     pub write: bool,

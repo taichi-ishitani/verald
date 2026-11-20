@@ -22,7 +22,8 @@ fn take_log() -> Vec<String> {
     LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
 }
 
-#[derive(Clone, Debug, SequenceItem)]
+#[sequence_item]
+#[derive(Clone, Debug)]
 struct Tx {
     addr: u32,
 }

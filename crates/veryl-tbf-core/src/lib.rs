@@ -29,7 +29,7 @@ pub use sequencer::{
 };
 pub use test::{BundledSpecs, FromSetting, Methodology, Scenario, SetupContext, Spec, Test};
 pub use tlm::{AnalysisExport, AnalysisFifo, AnalysisPort, ItemWaiter, Subscriber};
-pub use veryl_tbf_macros::{SequenceItem, component, register_test, sequence};
+pub use veryl_tbf_macros::{component, register_test, sequence, sequence_item};
 pub use veryl_tbf_random::SeedSource;
 
 /// Bundles specs, applied in the order given: `bundled_specs![SlowWrites,
@@ -48,8 +48,8 @@ pub mod prelude {
         Component, DefaultSequence, DriverPort, HasBase, HasContext, Instance, InstanceContext,
         IntoContext, IntoHandle, ItemHandle, ItemWaiter, Kind, Knob, MonitorPort, OptInstance,
         ReactiveSequence, ReactiveSequencer, ReportContext, RequestPort, RunContext, Scenario,
-        Scope, SeqItemPort, Sequence, SequenceCore, SequenceItem, Sequencer, SequencerHandle,
-        SetupContext, Spec, Subscriber, Test, bundled_specs, component, register_test, sequence,
+        Scope, SeqItemPort, Sequence, SequenceCore, Sequencer, SequencerHandle, SetupContext, Spec,
+        Subscriber, Test, bundled_specs, component, register_test, sequence, sequence_item,
     };
 }
 

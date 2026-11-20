@@ -1082,25 +1082,22 @@ pub(crate) fn sequence(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     })
 }
 
-/// `#[derive(SequenceItem)]`: the alias of the item's handle, `<Name>Handle`
+/// `#[sequence_item]`: the alias of the item's handle, `<Name>Handle`
 /// (`#[sequence_item(handle = Other)]` to name it otherwise), as visible as
-/// the item.
-pub(crate) fn sequence_item(input: TokenStream2) -> syn::Result<TokenStream2> {
+/// the item, after the item left as it is.
+pub(crate) fn sequence_item(attr: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
     let core = core();
-    let input: syn::DeriveInput = syn::parse2(input)?;
+    let input: syn::DeriveInput = syn::parse2(item.clone())?;
     let mut alias = format_ident!("{}Handle", input.ident);
-    for attr in &input.attrs {
-        if attr.path().is_ident("sequence_item") {
-            attr.parse_nested_meta(|nested| {
-                if nested.path.is_ident("handle") {
-                    alias = nested.value()?.parse::<Ident>()?;
-                    Ok(())
-                } else {
-                    Err(nested.error("expected `handle = Name`"))
-                }
-            })?;
+    let parser = syn::meta::parser(|nested| {
+        if nested.path.is_ident("handle") {
+            alias = nested.value()?.parse::<Ident>()?;
+            Ok(())
+        } else {
+            Err(nested.error("expected `handle = Name`"))
         }
-    }
+    });
+    syn::parse::Parser::parse2(parser, attr)?;
     let vis = &input.vis;
     let name = &input.ident;
     let doc = format!("The handle of a shared `{name}` (an `ItemHandle`).");
@@ -1149,6 +1146,8 @@ pub(crate) fn sequence_item(input: TokenStream2) -> syn::Result<TokenStream2> {
         (quote!(<#(#params),*>), quote!(<#(#args),*>))
     };
     Ok(quote! {
+        #item
+
         #[doc = #doc]
         #vis type #alias #params = #core::ItemHandle<#name #args>;
     })
