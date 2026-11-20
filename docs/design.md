@@ -1734,6 +1734,20 @@ None at present; deferred work is under [TODO](#todo).
 
 ### veryl-tbf
 
+- Renaming the project: with assertions planned (see
+  [assertion-design.md](assertion-design.md)), beside the testbench and
+  constrained random, and coverage likely later, "testbench framework" no
+  longer covers what the project is. The name is to cover verification as
+  a whole, and to serve as a short prefix for the crates (`<name>-runtime`,
+  `<name>-random`, `<name>-assert`) and in paths (`<name>::prelude`).
+  The candidate is **Verald**: Verification + Emerald, after Veryl's
+  Verilog + Beryl (the emerald being a variety of beryl); it also recalls
+  Vera, a forerunner of SystemVerilog's verification features. Others
+  considered: `veryl-verify` (plain, longer), `veryl-dv` (short, but close
+  to rustdv and rustdv-veryl), `veryl-vf` (short, but unclear). Whether the
+  name is free on crates.io and GitHub is not checked yet. To be done when
+  the assertions' proof of concept starts.
+
 - Drain time: a wait between the test's `run` returning and the end of the
   run phase (UVM's `set_drain_time`), in time or in clock edges. Not needed
   yet. (The case it solves: a monitor publishing the last transfer at the
