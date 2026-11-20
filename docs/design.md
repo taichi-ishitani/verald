@@ -1212,6 +1212,24 @@ Decided:
   an `.await`, and the executor is single-threaded, so the borrows never
   overlap. Users meet `Cell` / `RefCell` only when a forked task changes a
   field of their own.
+- A `Semaphore`, as SystemVerilog's `semaphore`, for a limit on what is
+  outstanding (AXI's outstanding transactions) or a resource shared by
+  tasks: `acquire(n).await` takes keys (`get`), `try_acquire(n)` does not
+  wait (`try_get`), `release(permit)` gives them back (`put`), `add(n)`
+  adds keys (`put` beyond those taken).
+  - Taking keys gives a `Permit`, which `release` takes back. A permit
+    dropped instead gives its keys back too, so a task dropped while it
+    holds keys (at the end of the run phase, the losing side of `first`)
+    does not keep them. `forget` keeps them taken. `release` panics on a
+    permit of another semaphore.
+  - Requests are served in the order made, one that cannot be served yet
+    holding back those after it, so the order is the same in every run (the
+    LRM leaves it open). A wait dropped before it is served leaves the
+    queue; served but not yet taken, it gives the keys back.
+  - `acquire` is an `async fn`, as `Fifo::get` / `put` are, awaited as the
+    other waits are, not a macro: the `.await` marks where a task yields,
+    and a future is needed to combine waits
+    (`first(semaphore.acquire(1), clk.wait(100))`).
 - The recommended shape for a component with several threads: a struct per
   thread (a stage, a channel) holding what that thread owns, the parts the
   threads share as fields of the component, and `run` joining the
@@ -1553,7 +1571,7 @@ hierarchy.
 | Crate | Contents |
 |---|---|
 | `veryl-tbf` | the entry point users depend on: re-exports the others, with a prelude; `core` can be left out by a feature |
-| `veryl-tbf-runtime` | the executor, tasks and their concurrency (`fork_scope`, `join`, `first`), waits for clocks and resets (`run_with_reset`), the shared parts (`Fifo`, events), clocking blocks, the simulator boundary and Veryl's adapter, the timeout, unexpected finishes, panic detection |
+| `veryl-tbf-runtime` | the executor, tasks and their concurrency (`fork_scope`, `join`, `first`), waits for clocks and resets (`run_with_reset`), the shared parts (`Fifo`, events, `Semaphore`), clocking blocks, the simulator boundary and Veryl's adapter, the timeout, unexpected finishes, panic detection |
 | `veryl-tbf-core` | the UVM-like part: `Component`, `Test`, `Instance`, `Scope`, the phases, `Knob`, `Callbacks`, TLM, items (`ItemHandle`), sequences and sequencers, agents' and monitors' helpers, `ItemWaiter`, `Spec` / `BundledSpecs`, the runner (`register_test!`, test selection, reporting, the error limit) |
 | `veryl-tbf-macros` | the proc macros of both (`#[clocking]`, `#[modport]`, the wait macros; `#[component(..)]`, `#[sequence]`, `register_test!`; `bundled_specs!` is a `macro_rules!` of the core) |
 | `veryl-tbf-random` | constrained random; depends on nothing else here, so it can be used on its own |

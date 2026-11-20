@@ -30,7 +30,7 @@ pub use error::TestError;
 pub use host::{Start, Testbench};
 pub use signals::{Clock, Edges, Reset, ResetWait, run_with_reset};
 pub use state::RunEnd;
-pub use sync::{Event, Fifo};
+pub use sync::{Event, Fifo, Permit, Semaphore};
 pub use veryl_tbf_macros::{
     changed, changed_within, clocking, edge, edge_within, modport, negedge, negedge_within,
     posedge, posedge_within, tick_until, tick_until_within, tick_while, tick_while_within,
@@ -40,9 +40,9 @@ pub use veryl_tbf_macros::{
 pub mod prelude {
     pub use crate::{
         ArgValue, Clock, Clocking, ClockingPaths, ClockingTimeout, Either, Event, Fifo, ForkScope,
-        Reset, SignalValue, Signals, Start, TestError, Testbench, changed, changed_within,
-        clocking, edge, edge_within, first, fork_scope, join, modport, negedge, negedge_within,
-        posedge, posedge_within, run_with_reset, runtime_arg, runtime_arg_exists,
+        Permit, Reset, Semaphore, SignalValue, Signals, Start, TestError, Testbench, changed,
+        changed_within, clocking, edge, edge_within, first, fork_scope, join, modport, negedge,
+        negedge_within, posedge, posedge_within, run_with_reset, runtime_arg, runtime_arg_exists,
         runtime_arg_value, runtime_args, tick, tick_until, tick_until_within, tick_while,
         tick_while_within, try_join,
     };

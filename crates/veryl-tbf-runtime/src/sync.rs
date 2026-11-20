@@ -1,4 +1,4 @@
-//! Parts that tasks share: events and FIFOs.
+//! Parts that tasks share: events, FIFOs and semaphores.
 //!
 //! They work through `&self`, with a `RefCell` inside that is borrowed only
 //! within one call or one poll, never across an `.await`; the executor is
@@ -270,5 +270,293 @@ impl<T: Clone> Fifo<T> {
             }
         })
         .await
+    }
+}
+
+/// A request waiting in a semaphore's queue.
+struct Request {
+    keys: usize,
+    /// Set when the keys are handed to the request.
+    granted: bool,
+    waker: Option<Waker>,
+}
+
+struct SemaphoreInner {
+    available: usize,
+    /// The requests waiting, oldest first.
+    queue: VecDeque<Rc<RefCell<Request>>>,
+}
+
+impl SemaphoreInner {
+    /// Hands keys to the waiting requests in order, while the oldest one can
+    /// be served; returns the wakers of those served.
+    fn serve(&mut self) -> Vec<Waker> {
+        let mut served = Vec::new();
+        while let Some(front) = self.queue.front() {
+            let mut request = front.borrow_mut();
+            if request.keys > self.available {
+                break;
+            }
+            self.available -= request.keys;
+            request.granted = true;
+            served.extend(request.waker.take());
+            drop(request);
+            self.queue.pop_front();
+        }
+        served
+    }
+}
+
+/// A semaphore, as SystemVerilog's `semaphore`: a number of keys that tasks
+/// take and give back. Clones share the semaphore.
+///
+/// Taking keys gives a [`Permit`], given back with [`Semaphore::release`].
+/// A permit dropped instead gives its keys back too, so a task dropped while
+/// it holds keys (at the end of the run phase, or the losing side of
+/// `first`) does not keep them. Requests are served in the order they were
+/// made: one that cannot be served yet holds back those after it, so the
+/// order is the same in every run.
+pub struct Semaphore {
+    inner: Rc<RefCell<SemaphoreInner>>,
+}
+
+impl Clone for Semaphore {
+    fn clone(&self) -> Self {
+        Semaphore {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl Semaphore {
+    /// A semaphore with `keys` keys, as SystemVerilog's `new(keys)`.
+    pub fn new(keys: usize) -> Self {
+        Semaphore {
+            inner: Rc::new(RefCell::new(SemaphoreInner {
+                available: keys,
+                queue: VecDeque::new(),
+            })),
+        }
+    }
+
+    /// The keys free now.
+    pub fn available(&self) -> usize {
+        self.inner.borrow().available
+    }
+
+    /// Takes `keys` keys, waiting until they are free and every earlier
+    /// request is served, as SystemVerilog's `get(keys)`.
+    pub async fn acquire(&self, keys: usize) -> Permit {
+        if let Some(permit) = self.try_acquire(keys) {
+            return permit;
+        }
+        let request = Rc::new(RefCell::new(Request {
+            keys,
+            granted: false,
+            waker: None,
+        }));
+        self.inner.borrow_mut().queue.push_back(request.clone());
+        let mut waiting = Waiting {
+            semaphore: self,
+            request,
+            taken: false,
+        };
+        poll_fn(|cx| {
+            let mut request = waiting.request.borrow_mut();
+            if request.granted {
+                Poll::Ready(())
+            } else {
+                request.waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        })
+        .await;
+        waiting.taken = true;
+        self.permit(keys)
+    }
+
+    /// Takes `keys` keys if they are free and no request waits before, as
+    /// SystemVerilog's `try_get(keys)`.
+    pub fn try_acquire(&self, keys: usize) -> Option<Permit> {
+        let mut inner = self.inner.borrow_mut();
+        if !inner.queue.is_empty() || inner.available < keys {
+            return None;
+        }
+        inner.available -= keys;
+        Some(self.permit(keys))
+    }
+
+    /// Gives the keys of `permit` back, as SystemVerilog's `put(keys)`, and
+    /// serves the requests waiting. Panics on a permit of another semaphore.
+    pub fn release(&self, permit: Permit) {
+        assert!(
+            Rc::ptr_eq(&self.inner, &permit.semaphore.inner),
+            "a permit is released to another semaphore than the one it came from"
+        );
+        drop(permit);
+    }
+
+    /// Adds `keys` keys, as SystemVerilog's `put(keys)` beyond those taken.
+    pub fn add(&self, keys: usize) {
+        self.give_back(keys);
+    }
+
+    fn permit(&self, keys: usize) -> Permit {
+        Permit {
+            semaphore: self.clone(),
+            keys,
+        }
+    }
+
+    fn give_back(&self, keys: usize) {
+        let served = {
+            let mut inner = self.inner.borrow_mut();
+            inner.available += keys;
+            inner.serve()
+        };
+        wake_all(served);
+    }
+}
+
+/// Keys taken from a [`Semaphore`], given back with [`Semaphore::release`],
+/// or when it is dropped.
+#[must_use = "the keys go back at once when the permit is dropped"]
+pub struct Permit {
+    semaphore: Semaphore,
+    keys: usize,
+}
+
+impl Permit {
+    /// The keys it holds.
+    pub fn keys(&self) -> usize {
+        self.keys
+    }
+
+    /// Keeps the keys taken: they do not go back when the permit is gone.
+    pub fn forget(mut self) {
+        self.keys = 0;
+    }
+}
+
+impl Drop for Permit {
+    fn drop(&mut self) {
+        if self.keys > 0 {
+            self.semaphore.give_back(self.keys);
+        }
+    }
+}
+
+/// A request of [`Semaphore::acquire`] in the queue. Dropped before it is
+/// served (the wait dropped), it leaves the queue; served but not taken, it
+/// gives the keys back.
+struct Waiting<'a> {
+    semaphore: &'a Semaphore,
+    request: Rc<RefCell<Request>>,
+    taken: bool,
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        if self.taken {
+            return;
+        }
+        let (granted, keys) = {
+            let request = self.request.borrow();
+            (request.granted, request.keys)
+        };
+        if granted {
+            self.semaphore.give_back(keys);
+        } else {
+            let served = {
+                let mut inner = self.semaphore.inner.borrow_mut();
+                inner.queue.retain(|r| !Rc::ptr_eq(r, &self.request));
+                inner.serve()
+            };
+            wake_all(served);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::pin::Pin;
+    use std::task::Context;
+
+    fn poll<F: Future>(future: &mut Pin<Box<F>>) -> Poll<F::Output> {
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+    }
+
+    #[test]
+    fn keys_are_taken_and_given_back() {
+        let semaphore = Semaphore::new(2);
+        let a = semaphore.try_acquire(1).unwrap();
+        let b = semaphore.try_acquire(1).unwrap();
+        assert!(semaphore.try_acquire(1).is_none());
+        semaphore.release(a);
+        assert_eq!(semaphore.available(), 1);
+        b.forget();
+        assert_eq!(semaphore.available(), 1);
+        semaphore.add(2);
+        assert_eq!(semaphore.available(), 3);
+        assert_eq!(semaphore.try_acquire(0).unwrap().keys(), 0);
+    }
+
+    #[test]
+    fn requests_are_served_in_order() {
+        let semaphore = Semaphore::new(1);
+        let held = semaphore.try_acquire(1).unwrap();
+        let mut big = Box::pin(semaphore.acquire(2));
+        let mut small = Box::pin(semaphore.acquire(1));
+        assert!(poll(&mut big).is_pending());
+        assert!(poll(&mut small).is_pending());
+        // A key back: the oldest request needs two, so neither is served,
+        // and `try_acquire` does not pass the queue either.
+        semaphore.release(held);
+        assert!(semaphore.try_acquire(1).is_none());
+        assert!(poll(&mut small).is_pending());
+        semaphore.add(2);
+        let Poll::Ready(big) = poll(&mut big) else {
+            panic!("the oldest request is served first");
+        };
+        let Poll::Ready(small) = poll(&mut small) else {
+            panic!("then the next");
+        };
+        assert_eq!((big.keys(), small.keys()), (2, 1));
+        assert_eq!(semaphore.available(), 0);
+    }
+
+    #[test]
+    fn a_dropped_wait_leaves_the_queue_or_gives_back() {
+        let semaphore = Semaphore::new(1);
+        let held = semaphore.try_acquire(1).unwrap();
+        let mut big = Box::pin(semaphore.acquire(2));
+        let mut small = Box::pin(semaphore.acquire(1));
+        assert!(poll(&mut big).is_pending());
+        assert!(poll(&mut small).is_pending());
+        // A permit dropped, not released, gives its keys back too.
+        drop(held);
+        // Leaving the queue lets the request after it in.
+        drop(big);
+        assert!(matches!(poll(&mut small), Poll::Ready(_)));
+        // A request served but dropped before it is polled gives back.
+        let semaphore = Semaphore::new(0);
+        let mut wait = Box::pin(semaphore.acquire(1));
+        assert!(poll(&mut wait).is_pending());
+        semaphore.add(1);
+        assert_eq!(semaphore.available(), 0);
+        drop(wait);
+        assert_eq!(semaphore.available(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "another semaphore")]
+    fn a_permit_goes_back_to_its_own_semaphore() {
+        let a = Semaphore::new(1);
+        let b = Semaphore::new(1);
+        let permit = a.try_acquire(1).unwrap();
+        b.release(permit);
     }
 }
