@@ -125,6 +125,7 @@ fn initial_values(specs: &[&FieldSpec]) -> Vec<TokenStream2> {
                     let #local: #ty = #expr;
                     members.#ident.assume(&#local);
                 },
+                None if f.role == Role::Input => quote!(let #local = members.#ident.zero();),
                 None => quote!(let #local = members.#ident.initial();),
             }
         })
@@ -192,17 +193,25 @@ pub(crate) fn modport(attr: TokenStream2, item: TokenStream2) -> syn::Result<Tok
     let ck = quote!(#rt::clocking);
     let member_fields = specs.iter().map(|f| {
         let (ident, ty) = (&f.ident, &f.ty);
-        quote!(#ident: #ck::Member<#ty>)
+        if f.role == Role::Input {
+            quote!(#ident: #ck::__private::InputSignal<#ty>)
+        } else {
+            quote!(#ident: #ck::Driven<#ty>)
+        }
     });
     let binds = specs.iter().map(|f| {
         let (ident, ty, path) = (&f.ident, &f.ty, &f.name);
-        let ctor = if f.role == Role::Input {
-            quote!(input)
+        if f.role == Role::Input {
+            quote!(#ident: #ck::__private::InputSignal::<#ty>::member(source, #path)?)
         } else {
-            quote!(output)
-        };
-        quote!(#ident: #ck::Member::<#ty>::#ctor(bus, #path)?)
+            quote!(#ident: #ck::Driven::<#ty>::member(source, #path)?)
+        }
     });
+    let input_only = if specs.iter().all(|f| f.role == Role::Input) {
+        quote!(impl #ck::__private::InputOnly for #name {})
+    } else {
+        quote!()
+    };
     let all: Vec<&FieldSpec> = specs.iter().collect();
     let initials = initial_values(&all);
     let values = specs.iter().map(|f| {
@@ -214,7 +223,7 @@ pub(crate) fn modport(attr: TokenStream2, item: TokenStream2) -> syn::Result<Tok
     let inputs: Vec<&FieldSpec> = specs.iter().filter(|f| f.role == Role::Input).collect();
     let loads = inputs.iter().map(|f| {
         let ident = &f.ident;
-        quote!(self.#ident = self.#hidden.#ident.load();)
+        quote!(self.#ident = self.#hidden.#ident.read();)
     });
     let stores = specs.iter().filter(|f| f.role == Role::Output).map(|f| {
         let ident = &f.ident;
@@ -224,7 +233,7 @@ pub(crate) fn modport(attr: TokenStream2, item: TokenStream2) -> syn::Result<Tok
         let ident = &f.ident;
         let method = load_method(&f.name);
         let body = if f.role == Role::Input {
-            quote!(self.#ident = self.#hidden.#ident.load();)
+            quote!(self.#ident = self.#hidden.#ident.read();)
         } else {
             // An output is not read.
             quote!()
@@ -248,10 +257,10 @@ pub(crate) fn modport(attr: TokenStream2, item: TokenStream2) -> syn::Result<Tok
             #(#member_fields,)*
         }
 
-        impl #ck::Modport for #name {
-            fn __bind(
-                bus: &#ck::__private::ModportRef,
-            ) -> ::core::result::Result<Self, #ck::__private::TestError> {
+        impl #ck::__private::ModportRead for #name {
+            fn __bind<M: #ck::__private::MemberSource + ?::core::marker::Sized>(
+                source: &M,
+            ) -> ::core::result::Result<Self, #ck::__private::HostError> {
                 #[allow(unused_mut)]
                 let mut members = #members { #(#binds,)* };
                 #(#initials)*
@@ -261,18 +270,22 @@ pub(crate) fn modport(attr: TokenStream2, item: TokenStream2) -> syn::Result<Tok
                 })
             }
 
-            fn __init(&mut self) {
-                #(#inits)*
-            }
-
             fn __load(&mut self) {
                 #(#loads)*
+            }
+        }
+
+        impl #ck::ModportDrive for #name {
+            fn __init(&mut self) {
+                #(#inits)*
             }
 
             fn __store(&mut self) {
                 #(#stores)*
             }
         }
+
+        #input_only
 
         impl #name {
             #(#load_methods)*
@@ -295,7 +308,11 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     let signals: Vec<&FieldSpec> = specs.iter().filter(|f| f.role != Role::Modport).collect();
     let state_fields = signals.iter().map(|f| {
         let (ident, ty) = (&f.ident, &f.ty);
-        quote!(#ident: #ck::Member<#ty>)
+        if f.role == Role::Input {
+            quote!(#ident: #ck::__private::InputSignal<#ty>)
+        } else {
+            quote!(#ident: #ck::Driven<#ty>)
+        }
     });
     let paths = format_ident!("{}Paths", name);
     let path_fields = specs.iter().map(|f| {
@@ -310,15 +327,15 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     let member_binds = signals.iter().map(|f| {
         let (ident, ty) = (&f.ident, &f.ty);
         let path = path_of(f);
-        let (ctor, lookup) = if f.role == Role::Input {
-            (quote!(input_port), quote!(input))
+        let (signal, lookup) = if f.role == Role::Input {
+            (quote!(#ck::__private::InputSignal::<#ty>), quote!(input))
         } else {
-            (quote!(output_port), quote!(output))
+            (quote!(#ck::Driven::<#ty>), quote!(output))
         };
         quote! {
             #ident: {
                 let path = #path;
-                #ck::Member::<#ty>::#ctor(
+                #signal::bind(
                     #ck::__private::Signals::#lookup(signals, path)?,
                     path,
                 )?
@@ -329,14 +346,14 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     let signal_inits = init_body(&signals, &hidden);
     let modport_inits = specs.iter().filter(|f| f.role == Role::Modport).map(|f| {
         let ident = &f.ident;
-        quote!(#ck::Modport::__init(&mut self.#ident);)
+        quote!(#ck::ModportDrive::__init(&mut self.#ident);)
     });
     let binds = specs.iter().map(|f| {
         let (ident, ty) = (&f.ident, &f.ty);
         if f.role == Role::Modport {
             let path = path_of(f);
             quote! {
-                #ident: <#ty as #ck::Modport>::__bind(
+                #ident: <#ty as #ck::__private::ModportRead>::__bind(
                     &#ck::__private::Signals::interface(signals, #path)?,
                 )?
             }
@@ -353,15 +370,15 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     let loads = specs.iter().filter_map(|f| {
         let ident = &f.ident;
         match f.role {
-            Role::Modport => Some(quote!(#ck::Modport::__load(&mut self.#ident);)),
-            Role::Input => Some(quote!(self.#ident = self.#hidden.#ident.load();)),
+            Role::Modport => Some(quote!(#ck::__private::ModportRead::__load(&mut self.#ident);)),
+            Role::Input => Some(quote!(self.#ident = self.#hidden.#ident.read();)),
             Role::Output => None,
         }
     });
     let stores = specs.iter().filter_map(|f| {
         let ident = &f.ident;
         match f.role {
-            Role::Modport => Some(quote!(#ck::Modport::__store(&mut self.#ident);)),
+            Role::Modport => Some(quote!(#ck::ModportDrive::__store(&mut self.#ident);)),
             Role::Output => Some(quote!(self.#hidden.#ident.store(&self.#ident);)),
             Role::Input => None,
         }
@@ -370,8 +387,8 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
         let ident = &f.ident;
         let method = load_method(&f.name);
         let body = match f.role {
-            Role::Modport => quote!(#ck::Modport::__load(&mut self.#ident);),
-            Role::Input => quote!(self.#ident = self.#hidden.#ident.load();),
+            Role::Modport => quote!(#ck::__private::ModportRead::__load(&mut self.#ident);),
+            Role::Input => quote!(self.#ident = self.#hidden.#ident.read();),
             Role::Output => quote!(),
         };
         quote! {

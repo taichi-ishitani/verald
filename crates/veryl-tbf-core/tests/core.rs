@@ -7,7 +7,8 @@ use veryl_component::Value;
 use veryl_component::testing::MockSim;
 use veryl_tbf_core::prelude::*;
 use veryl_tbf_core::{Kind, Methodology};
-use veryl_tbf_runtime::{Clock, Signals, TestError};
+use veryl_tbf_runtime::host::Registered;
+use veryl_tbf_runtime::{Clock, Clocks, Signals, TestError};
 
 thread_local! {
     static LOG: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
@@ -173,7 +174,7 @@ impl Test for BasicTest {
     fn setup(setup_context: &mut SetupContext) -> Result<BasicConfig, TestError> {
         Ok(BasicConfig {
             env: EnvConfig {
-                clk: Signals::clock(&ScopeLess, "clk")?,
+                clk: Clocks::clock(&Registered, "clk")?,
                 counters: setup_context.get_or("counters", 2)?,
                 broken: false,
             },
@@ -181,24 +182,6 @@ impl Test for BasicTest {
             deref_in_run: false,
             errors: 0,
         })
-    }
-}
-
-/// Looks clocks up outside a scope, for `setup`.
-struct ScopeLess;
-
-impl Signals for ScopeLess {
-    fn clock(&self, name: &str) -> Result<Clock, TestError> {
-        veryl_tbf_runtime::host::registered_clock(name)
-    }
-    fn interface(&self, name: &str) -> Result<veryl_component::ModportRef, TestError> {
-        veryl_tbf_runtime::host::registered_interface(name)
-    }
-    fn input(&self, path: &str) -> Result<veryl_component::InputPort, TestError> {
-        veryl_tbf_runtime::host::registered_input(path)
-    }
-    fn output(&self, path: &str) -> Result<veryl_component::OutputPort, TestError> {
-        veryl_tbf_runtime::host::registered_output(path)
     }
 }
 

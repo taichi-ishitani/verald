@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::fmt;
 
 use veryl_component::Value;
-use veryl_tbf_runtime::{TestError, host, sim};
+use veryl_tbf_runtime::{TestError, host, host_layer};
 
 /// A message's severity, most severe first. A fatal error is not one: it is
 /// an `Err` returned from `run`.
@@ -136,10 +136,10 @@ pub(crate) fn message(severity: Severity, path: &str, text: fmt::Arguments<'_>) 
         (severity <= r.log_level, limit)
     });
     if print {
-        sim::log(&format!(
+        host_layer::log(&format!(
             "{} @ {} {path}: {text}",
             severity.label(),
-            sim::time()
+            host_layer::time()
         ));
     }
     if let Some(errors) = limit {
@@ -160,21 +160,21 @@ pub(crate) fn summary(test: &str, seed: u64, fatal: Option<(&str, &TestError)>) 
         .into_iter()
         .map(|s| format!("{} {}", counts[s as usize], s.name()))
         .collect();
-    sim::log(&format!(
+    host_layer::log(&format!(
         "--- report summary: test {test}, seed {seed}, ended at {} ---",
-        sim::time()
+        host_layer::time()
     ));
     let runtime_args = veryl_tbf_runtime::runtime_args();
     if !runtime_args.is_empty() {
-        sim::log(&format!(
+        host_layer::log(&format!(
             "runtime arguments: {}",
             veryl_tbf_runtime::args::format(&runtime_args)
         ));
     }
-    sim::log(&counted.join(", "));
+    host_layer::log(&counted.join(", "));
     match fatal {
-        Some(("", error)) => sim::log(&format!("fatal: {error}")),
-        Some((owner, error)) => sim::log(&format!("fatal: {owner}: {error}")),
+        Some(("", error)) => host_layer::log(&format!("fatal: {error}")),
+        Some((owner, error)) => host_layer::log(&format!("fatal: {owner}: {error}")),
         None => {}
     }
 }

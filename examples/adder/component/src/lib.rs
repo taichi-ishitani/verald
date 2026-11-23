@@ -2,7 +2,7 @@
 //! bus with a clocking block and checks the sums.
 
 use veryl_tbf_runtime::prelude::*;
-use veryl_tbf_runtime::sim;
+use veryl_tbf_runtime::host_layer;
 
 /// The `tb` modport of `adder_if`, as values.
 #[modport]
@@ -76,7 +76,7 @@ impl Testbench for Adder {
                     format!("the adder counted {} additions, not {count}", cb.count).into(),
                 );
             }
-            sim::log(&format!("{count} additions checked"));
+            host_layer::log(&format!("{count} additions checked"));
             Ok(())
         });
         Ok(())

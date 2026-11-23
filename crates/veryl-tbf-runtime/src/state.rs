@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use veryl_component::{InputPort, ModportRef, OutputPort, RuntimeArg, Value};
+use veryl_component::{InputPort, ModportRef, OutputPort, Value};
 
 use crate::TestError;
 use crate::executor::TaskId;
@@ -51,8 +51,6 @@ pub(crate) struct State {
     pub(crate) inputs: Vec<(String, InputPort)>,
     pub(crate) outputs: Vec<(String, OutputPort)>,
     pub(crate) settings: Vec<Setting>,
-    /// The runtime arguments, taken at `start`.
-    pub(crate) runtime_args: Vec<RuntimeArg>,
     /// The edges of the master clock the run phase must end within; 0 for
     /// no limit.
     pub(crate) timeout: u64,
@@ -65,10 +63,6 @@ pub(crate) struct State {
     /// A fatal error raised outside a task's return (`host::fatal`), ending
     /// the run phase once the running task yields.
     pub(crate) pending_fatal: Option<(String, TestError)>,
-    /// Set on entering a hook and cleared on a normal return: a hook that
-    /// finds it set knows the previous one unwound.
-    pub(crate) in_hook: bool,
-    pub(crate) poisoned: bool,
 }
 
 impl State {
@@ -81,15 +75,12 @@ impl State {
             inputs: Vec::new(),
             outputs: Vec::new(),
             settings: Vec::new(),
-            runtime_args: Vec::new(),
             timeout: DEFAULT_TIMEOUT,
             master_clock: None,
             main: None,
             main_done: false,
             on_end: None,
             pending_fatal: None,
-            in_hook: false,
-            poisoned: false,
         }
     }
 

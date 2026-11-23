@@ -23,6 +23,7 @@
 //! module's.
 
 use std::future::Future;
+use std::marker::PhantomData;
 use std::rc::Rc;
 
 use veryl_component::{
@@ -31,9 +32,10 @@ use veryl_component::{
 
 use crate::TestError;
 use crate::args::{self, ArgValue};
+use crate::clocking::Clocks;
 use crate::executor::{self, Polled};
+use crate::host_layer::{self, HookGuard, HookSubscriber, HostError, Signals};
 use crate::signals::{Clock, ClockState, Reset, ResetState};
-use crate::sim::{self, HookGuard};
 use crate::state::{self, EndHandler, Phase, RunEnd, Setting, with_state};
 
 type HookResult = veryl_component::Result<()>;
@@ -154,20 +156,103 @@ impl Start {
     }
 }
 
-impl crate::clocking::Signals for Start {
-    fn clock(&self, name: &str) -> Result<Clock, TestError> {
-        Start::clock(self, name)
+/// The test module's registrations, as the host layer's `Signals` and the
+/// runtime's `Clocks`: what `Start` and the methodology's `Scope` bind
+/// through, and what code outside both (a test's `setup`) may use.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Registered;
+
+/// A registration's error, as the host layer's `Signals` returns it.
+fn to_host_error(error: TestError) -> HostError {
+    HostError::new(error.message())
+}
+
+impl Signals for Registered {
+    type Members = ModportRef;
+    fn interface(&self, name: &str) -> Result<ModportRef, HostError> {
+        registered_interface(name).map_err(to_host_error)
     }
-    fn interface(&self, name: &str) -> Result<ModportRef, TestError> {
-        registered_interface(name)
+    fn input(&self, path: &str) -> Result<InputPort, HostError> {
+        registered_input(path).map_err(to_host_error)
     }
-    fn input(&self, path: &str) -> Result<InputPort, TestError> {
-        registered_input(path)
+    fn output(&self, path: &str) -> Result<OutputPort, HostError> {
+        registered_output(path).map_err(to_host_error)
     }
-    fn output(&self, path: &str) -> Result<OutputPort, TestError> {
-        registered_output(path)
+    fn clock_port(&self, name: &str) -> Result<ClockPort, HostError> {
+        registered_clock_port(name).map_err(to_host_error)
+    }
+    fn reset_port(&self, name: &str) -> Result<ResetPort, HostError> {
+        registered_reset_port(name).map_err(to_host_error)
     }
 }
+
+impl Clocks for Registered {
+    fn clock(&self, name: &str) -> Result<Clock, TestError> {
+        registered_clock(name)
+    }
+    fn reset(&self, name: &str) -> Result<Reset, TestError> {
+        registered_reset(name)
+    }
+}
+
+/// Implements the host layer's `Signals` and the runtime's `Clocks` for
+/// `$ty` over the test module's registrations ([`host::Registered`]).
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __registered_signals {
+    ($ty:ty) => {
+        impl $crate::Signals for $ty {
+            type Members = $crate::host_layer::ModportRef;
+            fn interface(
+                &self,
+                name: &str,
+            ) -> ::core::result::Result<Self::Members, $crate::HostError> {
+                $crate::Signals::interface(&$crate::host::Registered, name)
+            }
+            fn input(
+                &self,
+                path: &str,
+            ) -> ::core::result::Result<$crate::host_layer::InputPort, $crate::HostError> {
+                $crate::Signals::input(&$crate::host::Registered, path)
+            }
+            fn output(
+                &self,
+                path: &str,
+            ) -> ::core::result::Result<$crate::host_layer::OutputPort, $crate::HostError> {
+                $crate::Signals::output(&$crate::host::Registered, path)
+            }
+            fn clock_port(
+                &self,
+                name: &str,
+            ) -> ::core::result::Result<$crate::host_layer::ClockPort, $crate::HostError> {
+                $crate::Signals::clock_port(&$crate::host::Registered, name)
+            }
+            fn reset_port(
+                &self,
+                name: &str,
+            ) -> ::core::result::Result<$crate::host_layer::ResetPort, $crate::HostError> {
+                $crate::Signals::reset_port(&$crate::host::Registered, name)
+            }
+        }
+
+        impl $crate::Clocks for $ty {
+            fn clock(
+                &self,
+                name: &str,
+            ) -> ::core::result::Result<$crate::Clock, $crate::TestError> {
+                $crate::Clocks::clock(&$crate::host::Registered, name)
+            }
+            fn reset(
+                &self,
+                name: &str,
+            ) -> ::core::result::Result<$crate::Reset, $crate::TestError> {
+                $crate::Clocks::reset(&$crate::host::Registered, name)
+            }
+        }
+    };
+}
+
+crate::__registered_signals!(Start);
 
 /// The interface registered as `name`.
 pub fn registered_interface(name: &str) -> Result<ModportRef, TestError> {
@@ -214,31 +299,18 @@ pub fn registered_output(path: &str) -> Result<OutputPort, TestError> {
     }
 }
 
-/// Enters a hook: publishes its context and checks for a poisoned runtime.
-/// `None` when the hook has nothing to do.
+/// Enters a hook through the host layer's frame. `None` when the hook has
+/// nothing to do: no simulation, or a component poisoned by a panic.
 fn enter(ctx: &mut SimCtx) -> Option<HookGuard> {
     if !state::exists() {
         return None;
     }
-    let poisoned = with_state(|s| {
-        if s.in_hook {
-            // The previous hook unwound: a panic, reported by Veryl.
-            s.poisoned = true;
-        }
-        s.in_hook = true;
-        s.poisoned
-    });
-    if poisoned {
-        return None;
-    }
-    Some(HookGuard::enter(ctx))
+    host_layer::enter(ctx)
 }
 
 /// Leaves a hook normally.
 fn leave() {
-    if state::exists() {
-        with_state(|s| s.in_hook = false);
-    }
+    host_layer::leave();
 }
 
 fn wake_all(wakers: Vec<std::task::Waker>) {
@@ -287,9 +359,9 @@ fn end(how: RunEnd) {
     let handler = with_state(|s| s.on_end.take());
     let handled = handler.map_or(Ok(()), |handler| handler(&how));
     match (&how, handled) {
-        (RunEnd::Fatal { owner, error }, _) => sim::fail(&fatal_message(owner, error)),
-        (RunEnd::Finished, Err(error)) => sim::fail(error.message()),
-        (RunEnd::Finished, Ok(())) => sim::finish(),
+        (RunEnd::Fatal { owner, error }, _) => host_layer::fail(&fatal_message(owner, error)),
+        (RunEnd::Finished, Err(error)) => host_layer::fail(error.message()),
+        (RunEnd::Finished, Ok(())) => host_layer::finish(),
     }
 }
 
@@ -333,31 +405,10 @@ fn check_timeout() {
     }
 }
 
-thread_local! {
-    /// The seed Veryl gives the testbench instance (`BuildCtx::seed`); kept
-    /// apart from the state, which `on_init` resets after it is taken.
-    static SEED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-/// Takes the seed Veryl derives for the instance from the run's seed
-/// (`veryl test --seed`), the test and the instance.
-#[doc(hidden)]
-pub fn on_build(ctx: &mut veryl_component::BuildCtx) -> HookResult {
-    SEED.with(|s| s.set(ctx.seed()));
-    Ok(())
-}
-
 /// The test's seed: the one Veryl gives the testbench instance, from which
 /// every seed of the testbench is derived.
 pub fn seed() -> u64 {
-    SEED.with(std::cell::Cell::get)
-}
-
-/// `on_init`: a fresh runtime for this simulation.
-pub fn on_init<T: Testbench>(_ctx: &mut SimCtx) -> HookResult {
-    state::init();
-    T::init();
-    Ok(())
+    crate::host_layer::seed()
 }
 
 /// Ends the run phase with a fatal error raised by `owner` outside a task's
@@ -384,19 +435,52 @@ pub fn registered_reset(name: &str) -> Result<Reset, TestError> {
         .ok_or_else(|| TestError::new(format!("no reset is registered as `{name}`")))
 }
 
-/// `on_clock`: counts the edge of the clock that fired, wakes its waiters,
-/// releases the resets (`on_clock` and `on_reset` are exclusive: a reset in
-/// force calls `on_reset` at every edge), and runs the ready tasks.
-pub fn on_clock(ctx: &mut SimCtx) -> HookResult {
-    let Some(_guard) = enter(ctx) else {
-        return Ok(());
-    };
-    if with_state(|s| s.phase) == Phase::Running {
+/// The port of the clock registered as `name`.
+pub fn registered_clock_port(name: &str) -> Result<ClockPort, TestError> {
+    with_state(|s| s.clocks.iter().find(|c| c.name == name).map(|c| c.port))
+        .ok_or_else(|| TestError::new(format!("no clock is registered as `{name}`")))
+}
+
+/// The port of the reset registered as `name`.
+pub fn registered_reset_port(name: &str) -> Result<ResetPort, TestError> {
+    with_state(|s| s.resets.iter().find(|r| r.name == name).map(|r| r.port))
+        .ok_or_else(|| TestError::new(format!("no reset is registered as `{name}`")))
+}
+
+/// The runtime as a subscriber of the host layer's hooks, over the
+/// testbench `T`.
+pub struct Runtime<T> {
+    testbench: PhantomData<fn() -> T>,
+}
+
+impl<T> Default for Runtime<T> {
+    fn default() -> Self {
+        Runtime {
+            testbench: PhantomData,
+        }
+    }
+}
+
+impl<T: Testbench> HookSubscriber for Runtime<T> {
+    /// A fresh runtime for this simulation.
+    fn on_init(&mut self) -> Result<(), HostError> {
+        state::init();
+        T::init();
+        Ok(())
+    }
+
+    /// Counts the edge of the clock that fired, wakes its waiters, releases
+    /// the resets (`on_clock` and `on_reset` are exclusive: a reset in force
+    /// calls `on_reset` at every edge), and runs the ready tasks.
+    fn on_clock(&mut self) -> Result<(), HostError> {
+        if !state::exists() || with_state(|s| s.phase) != Phase::Running {
+            return Ok(());
+        }
         let fired: Vec<usize> = with_state(|s| {
             s.clocks
                 .iter()
                 .enumerate()
-                .filter(|(_, c)| sim::fired(c.port))
+                .filter(|(_, c)| host_layer::fired(c.port))
                 .map(|(i, _)| i)
                 .collect()
         });
@@ -410,57 +494,57 @@ pub fn on_clock(ctx: &mut SimCtx) -> HookResult {
         }
         check_timeout();
         if with_state(|s| s.phase) != Phase::Running {
-            leave();
             return Ok(());
         }
-        let released: Vec<std::task::Waker> =
-            with_state(|s| s.resets.iter_mut().flat_map(|r| r.set(false)).collect());
+        let released: Vec<std::task::Waker> = with_state(|s| {
+            s.resets
+                .iter_mut()
+                .flat_map(|r| r.set(host_layer::reset_asserted(r.port)))
+                .collect()
+        });
         wake_all(released);
         run();
+        Ok(())
     }
-    leave();
-    Ok(())
-}
 
-/// `on_reset`: asserts the reset that fired and runs the ready tasks.
-pub fn on_reset(ctx: &mut SimCtx) -> HookResult {
-    let Some(_guard) = enter(ctx) else {
-        return Ok(());
-    };
-    if with_state(|s| s.phase) == Phase::Running {
+    /// Asserts the reset that fired and runs the ready tasks.
+    fn on_reset(&mut self) -> Result<(), HostError> {
+        if !state::exists() || with_state(|s| s.phase) != Phase::Running {
+            return Ok(());
+        }
         let asserted: Vec<std::task::Waker> = with_state(|s| {
             s.resets
                 .iter_mut()
-                .filter(|r| sim::fired(r.port))
-                .flat_map(|r| r.set(true))
+                .filter(|r| host_layer::fired(r.port))
+                .flat_map(|r| r.set(host_layer::reset_asserted(r.port)))
                 .collect()
         });
         wake_all(asserted);
         run();
+        Ok(())
     }
-    leave();
-    Ok(())
-}
 
-/// `on_finish`: an end before the run phase's is an unexpected finish.
-pub fn on_finish(ctx: &mut SimCtx) -> HookResult {
-    if let Some(_guard) = enter(ctx) {
-        match with_state(|s| s.phase) {
-            Phase::Setup => ctx_fail("the testbench was not started: call `start`"),
-            Phase::Running => ctx_fail(&format!(
-                "unexpected finish: the simulation ended before the test did \
-                 (the test module's `$finish` or cycle limit?); {}",
-                alive()
-            )),
-            Phase::Ended => {}
+    /// An end before the run phase's is an unexpected finish. The tasks
+    /// and the state are dropped, poisoned or not.
+    fn on_finish(&mut self) -> Result<(), HostError> {
+        if state::exists() && !host_layer::poisoned() {
+            match with_state(|s| s.phase) {
+                Phase::Setup => ctx_fail("the testbench was not started: call `start`"),
+                Phase::Running => ctx_fail(&format!(
+                    "unexpected finish: the simulation ended before the test did \
+                     (the test module's `$finish` or cycle limit?); {}",
+                    alive()
+                )),
+                Phase::Ended => {}
+            }
         }
+        state::clear();
+        Ok(())
     }
-    state::clear();
-    Ok(())
 }
 
 fn ctx_fail(message: &str) {
-    sim::fail(message);
+    host_layer::fail(message);
 }
 
 fn in_setup(what: &str) -> veryl_component::Result<()> {
@@ -506,6 +590,7 @@ pub fn set_master_clock(_ctx: &mut SimCtx, name: String) -> HookResult {
 pub fn set_reset(_ctx: &mut SimCtx, name: String, rst: ResetPort) -> HookResult {
     in_setup("set_reset")?;
     check_name(&name)?;
+    host_layer::track_reset(rst);
     with_state(|s| s.resets.push(ResetState::new(name, rst)));
     Ok(())
 }
@@ -524,6 +609,7 @@ pub fn set_interface(_ctx: &mut SimCtx, name: String, bus: ModportRef) -> HookRe
             }
             MemberPort::Reset(port) => {
                 check_name(&path)?;
+                host_layer::track_reset(port);
                 with_state(|s| s.resets.push(ResetState::new(path, port)));
             }
             MemberPort::Input(_) | MemberPort::Output(_) => {}
@@ -587,9 +673,8 @@ fn take_option<T: Testbench>(key: &str, value: &Value) -> Result<(), TestError> 
 /// Takes the runtime arguments, and the options among them (`TBF_<KEY>`),
 /// in the order given, so the last of a name wins. Returns the test's name
 /// from `TBF_TESTNAME`, if given.
-fn take_runtime_args<T: Testbench>(ctx: &SimCtx) -> Result<Option<String>, TestError> {
-    let runtime_args = ctx.runtime_args().to_vec();
-    with_state(|s| s.runtime_args = runtime_args.clone());
+fn take_runtime_args<T: Testbench>() -> Result<Option<String>, TestError> {
+    let runtime_args = host_layer::runtime_args();
     for arg in &runtime_args {
         let Some(key) = arg.name.strip_prefix(args::PREFIX) else {
             continue;
@@ -606,7 +691,7 @@ fn take_runtime_args<T: Testbench>(ctx: &SimCtx) -> Result<Option<String>, TestE
         };
         take_option::<T>(&key.to_lowercase(), &value).map_err(|e| args::error(&arg.name, &e))?;
     }
-    match args::find(&runtime_args, args::TESTNAME) {
+    match host_layer::find_arg(&runtime_args, args::TESTNAME) {
         None => Ok(None),
         Some(value) => String::try_from(value)
             .map(Some)
@@ -635,7 +720,7 @@ pub fn set(_ctx: &mut SimCtx, key: String, value: Value) -> HookResult {
 /// `TBF_TESTNAME` names the test over `test`, and `TBF_<KEY>` sets options.
 pub fn start<T: Testbench>(ctx: &mut SimCtx, test: String) -> HookResult {
     in_setup("start")?;
-    let test = match take_runtime_args::<T>(ctx) {
+    let test = match take_runtime_args::<T>() {
         Ok(name) => name.unwrap_or(test),
         Err(error) => bail!("{error}"),
     };
@@ -679,7 +764,3 @@ pub fn start<T: Testbench>(ctx: &mut SimCtx, test: String) -> HookResult {
         }
     }
 }
-
-/// The component the testbench exports to Veryl; see [`crate::export!`].
-#[derive(Default)]
-pub struct Host;

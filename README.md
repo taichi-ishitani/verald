@@ -180,7 +180,8 @@ feature.
 | Crate | Contents |
 |---|---|
 | `veryl-tbf` | the entry point: re-exports the others, with a prelude and `export!` |
-| `veryl-tbf-runtime` | the executor, tasks and their concurrency, clocks and resets, clocking blocks, the simulator boundary |
+| `veryl-tbf-host` | the host layer: what talks to Veryl's host API (hooks, services, typed signals), shared by the runtime and the assertions |
+| `veryl-tbf-runtime` | the executor, tasks and their concurrency, clocks and resets, clocking blocks, the registrations |
 | `veryl-tbf-core` | the UVM-like methodology: components, phases, tests, TLM, sequences, sequencers, agents, reporting |
 | `veryl-tbf-macros` | the procedural macros of the others |
 | `veryl-tbf-random` | constrained random; usable on its own |
@@ -193,6 +194,10 @@ feature.
   and what was taken from UVM.
 - [docs/random.md](docs/random.md): constrained random, as users write it;
   [docs/random-design.md](docs/random-design.md): its implementation.
+- [docs/host-layer-design.md](docs/host-layer-design.md): the layer over
+  Veryl's host API, shared by the runtime and the assertions.
+- [docs/assertion-design.md](docs/assertion-design.md): assertions, a
+  design study.
 - [docs/veryl-proposals.md](docs/veryl-proposals.md): what veryl-tbf would
   want of Veryl.
 - [docs/sv-simulators.md](docs/sv-simulators.md): running a testbench on a

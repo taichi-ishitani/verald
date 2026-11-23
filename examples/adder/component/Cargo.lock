@@ -306,6 +306,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "veryl-tbf-host"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "smallvec",
+ "veryl-component",
+]
+
+[[package]]
 name = "veryl-tbf-macros"
 version = "0.1.0"
 dependencies = [
@@ -330,8 +339,8 @@ name = "veryl-tbf-runtime"
 version = "0.1.0"
 dependencies = [
  "num-bigint",
- "smallvec",
  "veryl-component",
+ "veryl-tbf-host",
  "veryl-tbf-macros",
  "veryl-tbf-random",
 ]

@@ -96,6 +96,9 @@ holds for the others too.
 - Static dispatch (a type parameter or a feature), not a trait object: reads
   and writes are on the per-edge path. Until a second adapter exists, the
   boundary is a module split inside the framework, not a public trait.
+- The code on veryl-component's side of this boundary is a layer of its
+  own, shared with the assertions: see
+  [host-layer-design.md](host-layer-design.md).
 
 How other simulators would fit (not implemented):
 
@@ -1156,9 +1159,10 @@ users see follows rustdv-veryl's clocking blocks:
   [veryl-proposals.md](veryl-proposals.md#clocking-blocks-as-a-language-feature-a-study)),
   so the clock is given here.
 - Field types implement `SignalValue`: `bool`, the unsigned integers up to
-  `u128`, `BigUint` (any width), and `Value` (the bits as they are); every
-  type but `Value` reads X and Z as 0, as SystemVerilog's conversion to
-  two-state types.
+  `u128` and `BigUint` (any width). Signals are two-state: X and Z read as
+  0, as SystemVerilog's conversion to two-state types, and each type reads
+  and writes itself through the host layer's direct paths (see
+  [host-layer-design.md](host-layer-design.md#two-state-signals-first)).
 - Fields start at zero. An output is written when it differs from the value
   last written (zero at first), so an output never assigned is never
   driven and the design's value stands; `tick` writes the changed outputs
@@ -1575,7 +1579,8 @@ hierarchy.
 | Crate | Contents |
 |---|---|
 | `veryl-tbf` | the entry point users depend on: re-exports the others, with a prelude; `core` can be left out by a feature |
-| `veryl-tbf-runtime` | the executor, tasks and their concurrency (`fork_scope`, `join`, `first`), waits for clocks and resets (`run_with_reset`), the shared parts (`Fifo`, events, `Semaphore`), clocking blocks, the simulator boundary and Veryl's adapter, the timeout, unexpected finishes, panic detection |
+| `veryl-tbf-host` | the host layer: the hook entry and its dispatch, the hook's context and services, panic detection, value conversion, typed signals and modports, `Signals` (see [host-layer-design.md](host-layer-design.md)) |
+| `veryl-tbf-runtime` | the executor, tasks and their concurrency (`fork_scope`, `join`, `first`), waits for clocks and resets (`run_with_reset`), the shared parts (`Fifo`, events, `Semaphore`), clocking blocks, the registrations and Veryl's adapter as a subscriber of the host layer, the timeout, unexpected finishes |
 | `veryl-tbf-core` | the UVM-like part: `Component`, `Test`, `Instance`, `Scope`, the phases, `Knob`, `Callbacks`, TLM, items (`ItemHandle`), sequences and sequencers, agents' and monitors' helpers, `ItemWaiter`, `Spec` / `BundledSpecs`, the runner (`register_test!`, test selection, reporting, the error limit) |
 | `veryl-tbf-macros` | the proc macros of both (`#[clocking]`, `#[modport]`, the wait macros; `#[component(..)]`, `#[sequence]`, `register_test!`; `bundled_specs!` is a `macro_rules!` of the core) |
 | `veryl-tbf-random` | constrained random; depends on nothing else here, so it can be used on its own |
@@ -1593,6 +1598,10 @@ What each side holds where they meet:
 
 Static dispatch across the crates is kept with generics and `#[inline]`, so
 the split costs nothing per edge.
+
+The host layer (`veryl-tbf-host`) is below the runtime: what talks to
+Veryl's host API, which the runtime and the assertions both build on. See
+[host-layer-design.md](host-layer-design.md).
 
 ## Implementation notes
 
@@ -1744,8 +1753,9 @@ None at present; deferred work is under [TODO](#todo).
   Verilog + Beryl (the emerald being a variety of beryl); it also recalls
   Vera, a forerunner of SystemVerilog's verification features. Others
   considered: `veryl-verify` (plain, longer), `veryl-dv` (short, but close
-  to rustdv and rustdv-veryl), `veryl-vf` (short, but unclear). Whether the
-  name is free on crates.io and GitHub is not checked yet. To be done when
+  to rustdv and rustdv-veryl), `veryl-vf` (short, but unclear). The name
+  is free on crates.io (`verald` and `verald-*`, checked on 2026-11-20);
+  GitHub is not checked yet. To be done when
   the assertions' proof of concept starts.
 
 - Drain time: a wait between the test's `run` returning and the end of the

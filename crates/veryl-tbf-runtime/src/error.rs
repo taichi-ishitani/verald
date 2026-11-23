@@ -42,6 +42,13 @@ impl From<&str> for TestError {
     }
 }
 
+/// A binding failure or an error of the host layer.
+impl From<crate::host_layer::HostError> for TestError {
+    fn from(error: crate::host_layer::HostError) -> Self {
+        TestError::new(error.message())
+    }
+}
+
 impl From<veryl_component::Error> for TestError {
     fn from(error: veryl_component::Error) -> Self {
         TestError::new(format!("{error:#}"))

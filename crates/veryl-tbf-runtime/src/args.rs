@@ -1,7 +1,7 @@
 //! Runtime arguments: the values given to `veryl test` with `--runtime-arg`,
 //! read from anywhere in a test, as UVM's command line processor.
 //!
-//! The runtime takes a copy of them when the test module calls `start`; they
+//! The host layer takes a copy of them when the component is created; they
 //! do not change during the run, so they are read without a context:
 //!
 //! ```ignore
@@ -13,7 +13,7 @@
 pub use veryl_component::{ArgError, ArgValue, RuntimeArg};
 
 use crate::TestError;
-use crate::state::with_state;
+use crate::host_layer;
 
 /// The prefix of the runtime arguments the runtime itself reads.
 pub(crate) const PREFIX: &str = "TBF_";
@@ -25,12 +25,12 @@ pub(crate) const TESTNAME: &str = "TBF_TESTNAME";
 /// The value of the runtime argument `name` that wins (the last one given),
 /// or `None` if it was not given.
 pub fn runtime_arg(name: &str) -> Option<ArgValue> {
-    with_state(|s| find(&s.runtime_args, name).cloned())
+    host_layer::runtime_arg(name)
 }
 
 /// Whether the runtime argument `name` was given, as a flag or a value.
 pub fn runtime_arg_exists(name: &str) -> bool {
-    with_state(|s| find(&s.runtime_args, name).is_some())
+    host_layer::runtime_arg(name).is_some()
 }
 
 /// The value of the runtime argument `name` read as `T` (an integer, a
@@ -41,22 +41,12 @@ pub fn runtime_arg_value<T>(name: &str) -> Result<Option<T>, TestError>
 where
     T: for<'a> TryFrom<&'a ArgValue, Error = ArgError>,
 {
-    with_state(|s| match find(&s.runtime_args, name) {
-        None => Ok(None),
-        Some(value) => T::try_from(value).map(Some).map_err(|e| error(name, &e)),
-    })
+    Ok(host_layer::runtime_arg_value(name)?)
 }
 
 /// Every runtime argument as given, in order, overridden ones included.
 pub fn runtime_args() -> Vec<RuntimeArg> {
-    with_state(|s| s.runtime_args.clone())
-}
-
-pub(crate) fn find<'a>(args: &'a [RuntimeArg], name: &str) -> Option<&'a ArgValue> {
-    args.iter()
-        .rev()
-        .find(|arg| arg.name == name)
-        .map(|arg| &arg.value)
+    host_layer::runtime_args()
 }
 
 pub(crate) fn error(name: &str, error: &dyn std::fmt::Display) -> TestError {

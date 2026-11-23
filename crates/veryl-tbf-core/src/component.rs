@@ -7,8 +7,7 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::rc::Rc;
 
-use veryl_component::{InputPort, ModportRef, OutputPort};
-use veryl_tbf_runtime::{Clock, Reset, Signals, TestError, host, sim};
+use veryl_tbf_runtime::{Reset, TestError, host, host_layer};
 
 use crate::report::{self, Severity};
 use crate::seeds;
@@ -430,20 +429,7 @@ impl Scope {
     }
 }
 
-impl Signals for Scope {
-    fn clock(&self, name: &str) -> Result<Clock, TestError> {
-        host::registered_clock(name)
-    }
-    fn interface(&self, name: &str) -> Result<ModportRef, TestError> {
-        host::registered_interface(name)
-    }
-    fn input(&self, path: &str) -> Result<InputPort, TestError> {
-        host::registered_input(path)
-    }
-    fn output(&self, path: &str) -> Result<OutputPort, TestError> {
-        host::registered_output(path)
-    }
-}
+veryl_tbf_runtime::__registered_signals!(Scope);
 
 macro_rules! logging {
     ($ty:ty) => {
@@ -490,7 +476,7 @@ impl RunContext {
 
     /// The current simulation time.
     pub fn time(&self) -> u64 {
-        sim::time()
+        host_layer::time()
     }
 }
 

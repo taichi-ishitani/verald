@@ -41,6 +41,22 @@ struct IrqCb {
     done: bool,
 }
 
+/// A modport for monitoring: inputs only.
+#[modport]
+struct BusMonitor {
+    #[input]
+    done: bool,
+    #[input]
+    result: u16,
+}
+
+/// `#[modport]` marks a struct with no output as `InputOnly`.
+#[test]
+fn a_modport_of_inputs_only_is_input_only() {
+    fn input_only<T: veryl_tbf_runtime::host_layer::InputOnly>() {}
+    input_only::<BusMonitor>();
+}
+
 /// Outputs with initial values, in a modport and on their own.
 #[modport]
 struct InitBus {

@@ -235,9 +235,9 @@ end
   `timeout` option counts cycles of the master clock, the first registered
   (the DPI functions have no `tbf_set_master_clock` yet).
 - The DPI arguments are `bit`, so X and Z become 0 in SystemVerilog's
-  conversion, as veryl-tbf reads them on Veryl's simulator; only a
-  clocking-block field of type `Value` sees a difference (it keeps X on
-  Veryl's four-state simulation). `logic` (`svLogicVecVal`, whose
+  conversion, as veryl-tbf reads them on Veryl's simulator (signals are
+  two-state; see
+  [host-layer-design.md](host-layer-design.md#two-state-signals-first)). `logic` (`svLogicVecVal`, whose
   `aval` / `bval` match `Value`'s mask) would carry X if needed.
 
 ## The DPI interface

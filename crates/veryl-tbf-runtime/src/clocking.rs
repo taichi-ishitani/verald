@@ -20,7 +20,7 @@
 //!     #[modport] bus: AdderBus,
 //! }
 //!
-//! let mut cb = AdderCb::new(start.clock("clk")?, start.interface("bus")?)?;
+//! let mut cb = start.clocking::<AdderCb>("clk")?;
 //! cb.bus.start = true;
 //! tick!(cb);
 //! posedge!(cb.bus.done);
@@ -35,199 +35,47 @@ use std::fmt;
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;
 
-use num_bigint::BigUint;
-use smallvec::SmallVec;
-use veryl_component::{InputPort, ModportRef, OutputPort, Value};
+use veryl_component::OutputPort;
 
-use crate::{Clock, TestError, sim};
+use crate::host_layer::{HostError, MemberSource, ModportRead, OutputSignal, SignalValue, Signals};
+use crate::{Clock, Reset, TestError};
 
-/// A Rust type a signal is read into and written from.
-///
-/// Implemented for `bool`, the unsigned integers up to `u128`, `BigUint` (any
-/// width) and `Value` (the bits as they are, with X and Z). Every type but
-/// `Value` reads X and Z bits as 0, as SystemVerilog converts to two-state
-/// types.
-pub trait SignalValue: Clone + PartialEq {
-    /// Whether a signal of `width` bits fits the type.
-    fn fits(width: u32) -> bool;
-    /// All zeros, for a signal of `width` bits: a field's value before its
-    /// first sample.
-    fn zero(width: u32) -> Self {
-        Self::from_value(&Value::from_u64(0, width))
-    }
-    /// The value of the bits read.
-    fn from_value(value: &Value) -> Self;
-    /// The bits to write to a signal of `width` bits.
-    fn to_value(&self, width: u32) -> Value;
-}
-
-/// The bits of `value` with X and Z read as 0, least significant word first.
-fn two_state(value: &Value) -> impl Iterator<Item = u64> + '_ {
-    let mask = value.mask_xz();
-    value
-        .as_slice()
-        .iter()
-        .enumerate()
-        .map(move |(i, w)| w & !mask.get(i).copied().unwrap_or(0))
-}
-
-impl SignalValue for bool {
-    fn fits(width: u32) -> bool {
-        width == 1
-    }
-    fn from_value(value: &Value) -> Self {
-        two_state(value).next().unwrap_or(0) & 1 != 0
-    }
-    fn to_value(&self, width: u32) -> Value {
-        Value::from_u64(u64::from(*self), width)
-    }
-}
-
-macro_rules! unsigned_signal_value {
-    ($($ty:ty),*) => {$(
-        impl SignalValue for $ty {
-            fn fits(width: u32) -> bool {
-                width <= <$ty>::BITS
-            }
-            fn from_value(value: &Value) -> Self {
-                two_state(value).next().unwrap_or(0) as $ty
-            }
-            fn to_value(&self, width: u32) -> Value {
-                Value::from_u64(u64::from(*self), width)
-            }
-        }
-    )*};
-}
-
-unsigned_signal_value!(u8, u16, u32, u64);
-
-impl SignalValue for u128 {
-    fn fits(width: u32) -> bool {
-        width <= 128
-    }
-    fn from_value(value: &Value) -> Self {
-        let mut words = two_state(value);
-        let lo = words.next().unwrap_or(0);
-        let hi = words.next().unwrap_or(0);
-        u128::from(lo) | (u128::from(hi) << 64)
-    }
-    fn to_value(&self, width: u32) -> Value {
-        let words: SmallVec<[u64; 2]> = SmallVec::from_slice(&[*self as u64, (*self >> 64) as u64]);
-        Value::from_bits(words, SmallVec::new(), width)
-    }
-}
-
-impl SignalValue for BigUint {
-    fn fits(_width: u32) -> bool {
-        true
-    }
-    fn from_value(value: &Value) -> Self {
-        let words: Vec<u64> = two_state(value).collect();
-        let digits: Vec<u32> = words
-            .iter()
-            .flat_map(|w| [*w as u32, (*w >> 32) as u32])
-            .collect();
-        BigUint::from_slice(&digits)
-    }
-    fn to_value(&self, width: u32) -> Value {
-        Value::from_bits(
-            SmallVec::from_vec(self.to_u64_digits()),
-            SmallVec::new(),
-            width,
-        )
-    }
-}
-
-impl SignalValue for Value {
-    fn fits(_width: u32) -> bool {
-        true
-    }
-    fn from_value(value: &Value) -> Self {
-        value.clone()
-    }
-    fn to_value(&self, width: u32) -> Value {
-        let words = SmallVec::from_slice(self.as_slice());
-        let mask = SmallVec::from_slice(self.mask_xz());
-        Value::from_bits(words, mask, width)
-    }
-}
-
-#[derive(Clone, Copy)]
-enum MemberPort {
-    Input(InputPort),
-    Output(OutputPort),
-}
-
-/// A field of a modport, bound to its signal. Generated code holds one per
-/// field.
+/// An output of a clocking block or a modport, driven only when its value
+/// changed: the host layer's `OutputSignal` and the value last driven.
+/// Generated code holds one per output field.
 #[doc(hidden)]
-pub struct Member<T> {
-    port: MemberPort,
-    width: u32,
-    /// The value last driven, for an output: unchanged outputs are not
-    /// written again.
+pub struct Driven<T> {
+    signal: OutputSignal<T>,
+    /// The value last driven: unchanged outputs are not written again.
     last: T,
 }
 
-impl<T> fmt::Debug for Member<T> {
+impl<T> fmt::Debug for Driven<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Member")
+        f.write_str("Driven")
     }
 }
 
-fn check_width<T: SignalValue>(what: &str, width: u32) -> Result<(), TestError> {
-    if T::fits(width) {
-        Ok(())
-    } else {
-        Err(TestError::new(format!(
-            "`{what}` is {width} bits wide, which does not fit `{}`",
-            std::any::type_name::<T>()
-        )))
-    }
-}
-
-impl<T: SignalValue> Member<T> {
-    /// Binds the input member `name` of `bus`, checking that it fits `T`.
-    pub fn input(bus: &ModportRef, name: &str) -> Result<Self, TestError> {
-        Self::input_port(bus.input(name)?, &format!("{}.{name}", bus.path()))
-    }
-
-    /// Binds the input signal `port`; `what` names it in an error.
-    pub fn input_port(port: InputPort, what: &str) -> Result<Self, TestError> {
-        check_width::<T>(what, port.width())?;
-        Ok(Member {
-            port: MemberPort::Input(port),
-            width: port.width(),
-            last: T::zero(port.width()),
-        })
-    }
-
-    /// Binds the output member `name` of `bus`, checking that it fits `T`.
-    pub fn output(bus: &ModportRef, name: &str) -> Result<Self, TestError> {
-        Self::output_port(bus.output(name)?, &format!("{}.{name}", bus.path()))
+impl<T: SignalValue> Driven<T> {
+    /// Binds the output member `name` of `source`, checking that it fits
+    /// `T`.
+    pub fn member<M: MemberSource + ?Sized>(source: &M, name: &str) -> Result<Self, HostError> {
+        Ok(Self::new(OutputSignal::member(source, name)?))
     }
 
     /// Binds the output signal `port`; `what` names it in an error.
-    pub fn output_port(port: OutputPort, what: &str) -> Result<Self, TestError> {
-        check_width::<T>(what, port.width())?;
-        Ok(Member {
-            port: MemberPort::Output(port),
-            width: port.width(),
-            last: T::zero(port.width()),
-        })
+    pub fn bind(port: OutputPort, what: &str) -> Result<Self, HostError> {
+        Ok(Self::new(OutputSignal::bind(port, what)?))
     }
 
-    /// The field's value before its first sample: all zeros.
+    fn new(signal: OutputSignal<T>) -> Self {
+        let last = signal.zero();
+        Driven { signal, last }
+    }
+
+    /// The field's value before it is assigned: all zeros.
     pub fn initial(&self) -> T {
-        T::zero(self.width)
-    }
-
-    /// The value of an input before the current edge.
-    pub fn load(&self) -> T {
-        match self.port {
-            MemberPort::Input(port) => T::from_value(&sim::read(port)),
-            _ => unreachable!("loading a member that is not an input"),
-        }
+        self.signal.zero()
     }
 
     /// Takes `value` as the value last driven, without driving it.
@@ -237,40 +85,30 @@ impl<T: SignalValue> Member<T> {
 
     /// Drives `value`, whatever was last driven.
     pub fn force(&mut self, value: &T) {
-        match self.port {
-            MemberPort::Output(port) => sim::write(port, value.to_value(self.width)),
-            _ => unreachable!("storing a member that is not an output"),
-        }
+        self.signal.write(value);
         self.last = value.clone();
     }
 
     /// Drives `value` if it differs from the value last driven.
     pub fn store(&mut self, value: &T) {
         if *value != self.last {
-            match self.port {
-                MemberPort::Output(port) => sim::write(port, value.to_value(self.width)),
-                _ => unreachable!("storing a member that is not an output"),
-            }
+            self.signal.write(value);
             self.last = value.clone();
         }
     }
 }
 
-/// Where a clocking block's fields bind: the interfaces and signals the test
-/// module registered. `Start` implements it, and so does the methodology's
-/// `Scope`.
-pub trait Signals {
+/// Where a clocking block's clock binds, over the host layer's `Signals`:
+/// the clocks and resets the test module registered, as the runtime's
+/// `Clock` and `Reset`. `Start` implements it, and so does the
+/// methodology's `Scope`.
+pub trait Clocks: Signals {
     /// The clock registered as `name` (an interface's clock member as
     /// `"bus.clk"`).
     fn clock(&self, name: &str) -> Result<Clock, TestError>;
-    /// The interface registered as `name`.
-    fn interface(&self, name: &str) -> Result<ModportRef, TestError>;
-    /// The signal read at `path`: a registered input, or an interface's
-    /// member (`"bus.done"`).
-    fn input(&self, path: &str) -> Result<InputPort, TestError>;
-    /// The signal driven at `path`: a registered output, or an interface's
-    /// member (`"bus.start"`).
-    fn output(&self, path: &str) -> Result<OutputPort, TestError>;
+    /// The reset registered as `name` (an interface's reset member as
+    /// `"bus.rst"`).
+    fn reset(&self, name: &str) -> Result<Reset, TestError>;
 
     /// Makes a clocking block following the clock registered as `clock`,
     /// every field bound at its own name:
@@ -279,7 +117,7 @@ pub trait Signals {
     where
         Self: Sized,
     {
-        C::bind(self, self.clock(clock)?, Default::default())
+        C::bind(self, Clocks::clock(self, clock)?, Default::default())
     }
 
     /// Makes a clocking block following the clock registered as `clock`,
@@ -290,7 +128,7 @@ pub trait Signals {
     where
         Self: Sized,
     {
-        paths.bind(self, self.clock(clock)?)
+        paths.bind(self, Clocks::clock(self, clock)?)
     }
 }
 
@@ -315,11 +153,10 @@ pub trait ClockingPaths {
     -> Result<Self::Block, TestError>;
 }
 
-/// Implemented by `#[modport]` for its struct.
+/// Implemented by `#[modport]` for its struct: driving the outputs, on top
+/// of the host layer's binding and reading (`ModportRead`).
 #[doc(hidden)]
-pub trait Modport: Sized {
-    fn __bind(bus: &ModportRef) -> Result<Self, TestError>;
-    fn __load(&mut self);
+pub trait ModportDrive: ModportRead {
     fn __store(&mut self);
     fn __init(&mut self);
 }
@@ -587,7 +424,8 @@ pub mod waits {
 /// Items the generated code names, independent of the user's imports.
 #[doc(hidden)]
 pub mod __private {
-    pub use super::Signals;
+    pub use crate::host_layer::{
+        HostError, InputOnly, InputSignal, MemberSource, ModportRead, Signals,
+    };
     pub use crate::{Clock, TestError};
-    pub use veryl_component::{InputPort, ModportRef, OutputPort};
 }

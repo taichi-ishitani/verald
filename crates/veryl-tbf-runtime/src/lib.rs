@@ -15,8 +15,9 @@ mod concurrency;
 mod error;
 mod executor;
 pub mod host;
+/// The host layer, re-exported: see the `veryl-tbf-host` crate.
+pub use veryl_tbf_host as host_layer;
 mod signals;
-pub mod sim;
 mod state;
 mod sync;
 
@@ -24,10 +25,11 @@ pub use args::{
     ArgError, ArgValue, RuntimeArg, runtime_arg, runtime_arg_exists, runtime_arg_value,
     runtime_args,
 };
-pub use clocking::{Clocking, ClockingPaths, ClockingTimeout, SignalValue, Signals};
+pub use clocking::{Clocking, ClockingPaths, ClockingTimeout, Clocks};
 pub use concurrency::{Either, ForkScope, first, fork_scope, join, try_join, yield_now};
 pub use error::TestError;
 pub use host::{Start, Testbench};
+pub use host_layer::{HostError, SignalValue, Signals};
 pub use signals::{Clock, Edges, Reset, ResetWait, run_with_reset};
 pub use state::RunEnd;
 pub use sync::{Event, Fifo, Permit, Semaphore};
@@ -39,12 +41,12 @@ pub use veryl_tbf_macros::{
 /// The names a testbench usually needs.
 pub mod prelude {
     pub use crate::{
-        ArgValue, Clock, Clocking, ClockingPaths, ClockingTimeout, Either, Event, Fifo, ForkScope,
-        Permit, Reset, Semaphore, SignalValue, Signals, Start, TestError, Testbench, changed,
-        changed_within, clocking, edge, edge_within, first, fork_scope, join, modport, negedge,
-        negedge_within, posedge, posedge_within, run_with_reset, runtime_arg, runtime_arg_exists,
-        runtime_arg_value, runtime_args, tick, tick_until, tick_until_within, tick_while,
-        tick_while_within, try_join,
+        ArgValue, Clock, Clocking, ClockingPaths, ClockingTimeout, Clocks, Either, Event, Fifo,
+        ForkScope, Permit, Reset, Semaphore, SignalValue, Signals, Start, TestError, Testbench,
+        changed, changed_within, clocking, edge, edge_within, first, fork_scope, join, modport,
+        negedge, negedge_within, posedge, posedge_within, run_with_reset, runtime_arg,
+        runtime_arg_exists, runtime_arg_value, runtime_args, tick, tick_until, tick_until_within,
+        tick_while, tick_while_within, try_join,
     };
 }
 
@@ -70,7 +72,7 @@ macro_rules! component {
         #[derive(::veryl_component::Component)]
         #[component(kind = clocked)]
         $vis struct $ty {
-            host: $crate::host::Host,
+            runtime: $crate::host::Runtime<$tb>,
         }
 
         #[::veryl_component::component_impl]
@@ -79,35 +81,45 @@ macro_rules! component {
                 &mut self,
                 ctx: &mut ::veryl_component::BuildCtx,
             ) -> ::veryl_component::Result<()> {
-                $crate::host::on_build(ctx)
+                $crate::host_layer::entry::on_build(ctx, |ctx| {
+                    $crate::host_layer::HookSubscriber::on_build(&mut self.runtime, ctx)
+                })
             }
 
             fn on_init(
                 &mut self,
                 ctx: &mut ::veryl_component::SimCtx,
             ) -> ::veryl_component::Result<()> {
-                $crate::host::on_init::<$tb>(ctx)
+                $crate::host_layer::entry::on_init(ctx, || {
+                    $crate::host_layer::HookSubscriber::on_init(&mut self.runtime)
+                })
             }
 
             fn on_clock(
                 &mut self,
                 ctx: &mut ::veryl_component::SimCtx,
             ) -> ::veryl_component::Result<()> {
-                $crate::host::on_clock(ctx)
+                $crate::host_layer::entry::on_clock(ctx, || {
+                    $crate::host_layer::HookSubscriber::on_clock(&mut self.runtime)
+                })
             }
 
             fn on_reset(
                 &mut self,
                 ctx: &mut ::veryl_component::SimCtx,
             ) -> ::veryl_component::Result<()> {
-                $crate::host::on_reset(ctx)
+                $crate::host_layer::entry::on_reset(ctx, || {
+                    $crate::host_layer::HookSubscriber::on_reset(&mut self.runtime)
+                })
             }
 
             fn on_finish(
                 &mut self,
                 ctx: &mut ::veryl_component::SimCtx,
             ) -> ::veryl_component::Result<()> {
-                $crate::host::on_finish(ctx)
+                $crate::host_layer::entry::on_finish(ctx, || {
+                    $crate::host_layer::HookSubscriber::on_finish(&mut self.runtime)
+                })
             }
 
             /// Registers a clock under `name`.

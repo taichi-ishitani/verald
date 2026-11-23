@@ -12,6 +12,7 @@ publish = false
 
 [workspace.dependencies]
 veryl-tbf-core = { path = "crates/veryl-tbf-core" }
+veryl-tbf-host = { path = "crates/veryl-tbf-host" }
 veryl-tbf-macros = { path = "crates/veryl-tbf-macros" }
 veryl-tbf-random = { path = "crates/veryl-tbf-random" }
 veryl-tbf-runtime = { path = "crates/veryl-tbf-runtime" }

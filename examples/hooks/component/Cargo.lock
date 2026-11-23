@@ -245,6 +245,15 @@ version = "0.1.2"
 source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#37f252fbca5f592eead47bfdc8459bd73069ac55"
 
 [[package]]
+name = "veryl-tbf-host"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "smallvec",
+ "veryl-component",
+]
+
+[[package]]
 name = "veryl-tbf-macros"
 version = "0.1.0"
 dependencies = [
@@ -269,8 +278,8 @@ name = "veryl-tbf-runtime"
 version = "0.1.0"
 dependencies = [
  "num-bigint",
- "smallvec",
  "veryl-component",
+ "veryl-tbf-host",
  "veryl-tbf-macros",
  "veryl-tbf-random",
 ]
