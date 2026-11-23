@@ -1,6 +1,6 @@
 # Constrained random: implementation design
 
-> This document is for implementers of `veryl_tbf::random`: how the
+> This document is for implementers of `verald::random`: how the
 > specification in [random.md](random.md) is to be implemented, and the
 > decisions behind it, so that later changes can refer back to what was
 > decided and why.
@@ -38,7 +38,7 @@ randomize()                             (run time)
      post_randomize; on failure: return RandError, nothing changed
 ```
 
-The code lives in `crates/veryl-tbf-random/src/` (brought over from
+The code lives in `crates/random/src/` (brought over from
 rustdv-veryl's `random`):
 
 | File | Contents |
@@ -52,7 +52,7 @@ rustdv-veryl's `random`):
 | `rng.rs` | SplitMix64 |
 | `tests.rs` | the differential test |
 
-The macros are in `crates/veryl-tbf-macros/src/random.rs`.
+The macros are in `crates/random/macros/src/random.rs`.
 
 ## Macros
 
@@ -131,14 +131,14 @@ ones (`[[T; M]; N]`), which flatten the same way; nested variable sizes
 
 - The crate keeps a seed source per thread. Used on its own, a test seeds
   it with `random::set_seed(seed)`; unseeded, it starts from
-  `VERYL_TBF_RANDOM_SEED` (or 1).
+  `VERALD_RANDOM_SEED` (or 1).
 - A framework enters a source of its own (`SeedSource`, shared by its
   clones) for the part of the testbench running now: `enter` until the
   guard drops, or `seeded(source, future)` for the span of each poll of a
   future, so that tasks interleaving on one thread keep apart. While one
   is entered, seeds come from it instead of the thread's source.
   `derive_seed(seed, names)` makes a source's seed from names, as UVM's
-  `uvm_create_random_seed`. veryl-tbf gives every component and sequence
+  `uvm_create_random_seed`. Verald gives every component and sequence
   one (see the framework's design).
 - An object takes a seed from it on its first `randomize()` and keeps its
   own generator in the hidden field (random stability).

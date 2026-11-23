@@ -1,8 +1,8 @@
 //! A testbench on the runtime alone: drives additions through the adder's
 //! bus with a clocking block and checks the sums.
 
-use veryl_tbf_runtime::prelude::*;
-use veryl_tbf_runtime::host_layer;
+use verald_tb_runtime::prelude::*;
+use verald_tb_runtime::host;
 
 /// The `tb` modport of `adder_if`, as values.
 #[modport]
@@ -76,7 +76,7 @@ impl Testbench for Adder {
                     format!("the adder counted {} additions, not {count}", cb.count).into(),
                 );
             }
-            host_layer::log(&format!("{count} additions checked"));
+            host::log(&format!("{count} additions checked"));
             Ok(())
         });
         Ok(())
@@ -84,11 +84,11 @@ impl Testbench for Adder {
 }
 
 #[cfg(not(feature = "dpi"))]
-veryl_tbf_runtime::export!("tbf_adder", Adder);
+verald_tb_runtime::export!("verald_adder", Adder);
 
 // The same testbench, for a SystemVerilog simulator (see `verilator/`).
 #[cfg(feature = "dpi")]
 mod dpi {
-    veryl_tbf_runtime::component!(pub Tb, super::Adder);
-    veryl_tbf_dpi::export!(Tb);
+    verald_tb_runtime::component!(pub Tb, super::Adder);
+    verald_tb_dpi::export!(Tb);
 }

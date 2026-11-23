@@ -6,8 +6,8 @@
 
 use std::convert::Infallible;
 
-use veryl_tbf::prelude::*;
-use veryl_tbf::runtime::run_with_reset;
+use verald::prelude::*;
+use verald::tb::runtime::run_with_reset;
 
 // ---------------------------------------------------------------------------
 // The bus VIP
@@ -546,4 +546,4 @@ pub struct RandomTest {}
 
 register_test!(RandomTest);
 
-veryl_tbf::export!("tbf_regblock");
+verald::export!("verald_regblock");

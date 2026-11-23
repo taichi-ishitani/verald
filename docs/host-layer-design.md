@@ -1,11 +1,10 @@
 # Host layer: design
 
-> **Status:** implemented as the crate `veryl-tbf-host`, with the runtime
+> **Status:** implemented as the crate `verald-host`, with the runtime
 > as its one subscriber; what the assertions will need of it (probes,
 > several subscribers in `export!`) is not yet. It records how the code that
 > talks to Veryl's host API was separated from the runtime, so that layers
-> other than the testbench (assertions first) share it. The crate is
-> renamed with the project.
+> other than the testbench (assertions first) share it.
 
 ## Contents
 
@@ -29,7 +28,7 @@
 - One component may hold several layers (a testbench and assertions); a
   component has one entry for its hooks, so the layers are dispatched to
   from one place.
-- **Used within this project only.** The layer is a crate of veryl-tbf, not
+- **Used within this project only.** The layer is a crate of Verald, not
   published for other components nor proposed to the SDK.
 - A light run comes first: static dispatch, no allocation or host call on
   the per-edge path where it can be avoided.
@@ -40,13 +39,13 @@
 
 ```text
 veryl-component             the SDK: the host API
-`-- veryl-tbf-host          the hook entry and dispatch, the hook's context,
+`-- verald-host          the hook entry and dispatch, the hook's context,
     |                       services, value conversion, typed signals and
     |                       modports, Signals / MemberSource, HostError
-    +-- veryl-tbf-runtime   executor, Clock / Reset, registrations,
-    |   |                   clocking, lifecycle, TBF_ arguments
-    |   `-- veryl-tbf-core  methodology, report
-    +-- veryl-tbf-assert    property engine, probes, its lifecycle
+    +-- verald-tb-runtime   executor, Clock / Reset, registrations,
+    |   |                   clocking, lifecycle, VERALD_ arguments
+    |   `-- verald-tb-core  methodology, report
+    +-- verald-assert    property engine, probes, its lifecycle
     `-- (later layers)
 ```
 
@@ -148,7 +147,7 @@ same way. Four-state signals are deferred (see
 | `fired(port) -> bool` | whether the clock or reset `port` fired the current hook |
 | `seed() -> u64` | the instance's seed, taken at `create` |
 | `poisoned() -> bool` | whether a hook has unwound (see [Panic detection](#panic-detection)) |
-| `runtime_args() -> Vec<RuntimeArg>`, `runtime_arg(name)`, `runtime_arg_value::<T>(name)` | the arguments of `--runtime-arg`, raw, taken at `create`: the last one given wins, values converted by `ArgValue`'s conversions. Prefixes (`TBF_`) are the layers' |
+| `runtime_args() -> Vec<RuntimeArg>`, `runtime_arg(name)`, `runtime_arg_value::<T>(name)` | the arguments of `--runtime-arg`, raw, taken at `create`: the last one given wins, values converted by `ArgValue`'s conversions. Prefixes (`VERALD_`) are the layers' |
 | `track_reset(port)`, `reset_asserted(port) -> bool` | the state of a reset, below |
 
 Direct reads need no change to the simulator or the SDK: the host stages
@@ -298,8 +297,19 @@ pub trait Signals {
 Storing the output fields, only those that changed, is clocking's: the
 runtime's `ModportDrive` (`__store`, `__init`), over the `Driven<T>` the
 macro generates for each output.
-The macros crate is shared; `#[modport]` names the layer's crate through
-`proc-macro-crate`, as it names the runtime's today.
+`#[modport]` is `verald-macros`', its generation `verald-macros-codegen`'s
+(see [design.md](design.md#crate-layout)). It names the layer's crate
+through `proc-macro-crate` (`verald::host`, `verald_host`, or the
+runtime's re-export), and generates the parts driving outputs
+(`Driven<T>`, `ModportDrive`) only where the testbench's runtime is
+reached; without it, an `#[output]` field is an error.
+
+What `#[clocking]` and the wait macros use of a modport struct, and so
+what a struct generated otherwise (by Veryl, veryl-lang/veryl#3712) has
+to give: `ModportRead` (`__bind`, `__load`), `ModportDrive` (`__store`,
+`__init`), and a method per field reading that field alone
+(`__verald_load_<field>`), with which a wait reads only what its
+condition names.
 
 ### Errors
 
@@ -313,7 +323,7 @@ runtime converts it to `TestError`; the assertions to their own reports.
 to generate the layer's entry over a list of subscribers:
 
 ```rust
-veryl_tbf::export!("tb", testbench = Methodology, assertions = [BusSva, FifoSva]);
+verald::export!("tb", testbench = Methodology, assertions = [BusSva, FifoSva]);
 ```
 
 - The component struct holds one field per subscriber; each hook enters the
@@ -349,7 +359,7 @@ veryl_tbf::export!("tb", testbench = Methodology, assertions = [BusSva, FifoSva]
 - clocking: `Driven<T>` (writing only what changed), `tick`, the waits,
   `drive`;
 - the lifecycle (setup, running, ended), the timeout, unexpected finishes;
-- the `TBF_` arguments and the options.
+- the `VERALD_` arguments and the options.
 
 **The assertions** (see [assertion-design.md](assertion-design.md)): the
 property engine, the probes (`Signals` and `MemberSource` for an instance),
@@ -365,7 +375,7 @@ Done as a refactoring that keeps behavior, in steps, each checked by the
 existing tests and examples:
 
 1. The context and the services of `sim` moved to a new module of the
-   runtime (`host_layer`, say), which uses nothing of `crate::state`: the
+   runtime (`host`, say), which uses nothing of `crate::state`: the
    boundary is kept by that rule.
 2. The panic detection and the hook frame moved to it.
 3. `HookSubscriber` and the dispatch introduced; the runtime made a
@@ -382,7 +392,7 @@ existing tests and examples:
 6. The module moved out to its crate.
 
 Done before the assertions' proof of concept, which is built on the layer.
-The runtime re-exports the crate as `host_layer`, so the paths the macros
+The runtime re-exports the crate as `host`, so the paths the macros
 generate (through the runtime) and the runtime's own did not change.
 Changes the steps made to the public API: `Signals` returns ports only and
 `Clocks` (in the prelude) gives `clock`, `reset`, `clocking` and
@@ -399,6 +409,10 @@ from `create` on, not only after `start`.
   of a component is copied before every hook of the events it listens to
   (`stage_components` in Veryl's simulator); a change to Veryl.
 - Traces and other services as layers need them.
+- Modport structs generated by Veryl (veryl-lang/veryl#3712): the SDK
+  cannot implement `ModportDrive`, a testbench's trait, so the contract
+  above is to be split then, the SDK's types carrying the ports and the
+  packing, and the testbench wrapping them to drive what changed.
 - Four-state signals: a field type keeping X and Z, checks for unknown
   values, driving X or Z. To come as field types whose `read` and `write`
   carry the mask too (the SDK's `read` / `write`, or the mask's pointer),
@@ -437,7 +451,7 @@ anyway.
 ### Within the project, not proposed to the SDK
 
 Some of the layer would serve any component (typed reads above all), but
-its shape follows veryl-tbf's needs and is still changing. It can be
+its shape follows Verald's needs and is still changing. It can be
 proposed to veryl-component later, which would make the layer thinner.
 
 ### Two-state signals first

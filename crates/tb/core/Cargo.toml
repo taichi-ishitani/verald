@@ -1,0 +1,15 @@
+[package]
+name = "verald-tb-core"
+description = "The UVM-like methodology of verald: components, phases, tests and the runner."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+inventory = "0.3"
+veryl-component.workspace = true
+verald-tb-macros.workspace = true
+verald-random.workspace = true
+verald-tb-runtime.workspace = true

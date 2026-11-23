@@ -33,7 +33,7 @@
   generated SystemVerilog. The generated names differ from Veryl's (project
   prefixes, mangled generic instances, clock and reset prefixes and
   suffixes), so assertions on the SV would depend on the emitter's rules.
-- **Evaluated by a component**, as the rest of veryl-tbf is. Veryl does not
+- **Evaluated by a component**, as the rest of Verald is. Veryl does not
   instantiate or bind checkers; the component reads the design's signals and
   evaluates the properties itself.
 - Run time comes first: properties are compiled into state machines, not
@@ -43,9 +43,9 @@
 
 ## Overview
 
-Assertions are a crate of veryl-tbf, as constrained random is
-(`veryl-tbf-random`): tentatively `veryl-tbf-assert`, re-exported by
-`veryl-tbf`.
+Assertions are a crate of Verald, as constrained random is
+(`verald-random`): tentatively `verald-assert`, re-exported by
+`verald`.
 
 ```text
 #[assertions] struct / impl                (compile time, proc macros)
@@ -76,7 +76,7 @@ the signals it reads, with their Rust types, and its other fields are
 auxiliary state. The impl holds the properties and the hooks.
 
 ```rust
-use veryl_tbf::prelude::*;
+use verald::prelude::*;
 
 #[assertions(clock = "clk", reset = "rst")]
 #[derive(Default)]
@@ -362,7 +362,7 @@ module fifo_test {
     inst rst: $tb::reset_gen (clk);
     inst bus: fifo_if;
     inst dut: fifo (i_clk: clk, i_rst: rst, bus: bus.slave);
-    inst tb : $comp::tbf_fifo;      // testbench and assertions in one component
+    inst tb : $comp::verald_fifo;      // testbench and assertions in one component
 
     initial {
         tb.set_clock("clk", clk);
@@ -530,7 +530,7 @@ Possible optimizations:
 ## Failures and reporting
 
 - Failures are reported through the existing services (`fail`, `log`), as
-  veryl-tbf's errors: the property, the block, the simulation time and the
+  Verald's errors: the property, the block, the simulation time and the
   attempt's start time.
 - **A failure ends the test.** A limit on the number of failures is
   deferred; it would use the reporting's `max_errors`.
@@ -667,7 +667,7 @@ before adopting any.
   (a parser, transition systems). BSD-3-Clause, so it can be linked; it
   may spare writing a BTOR2 writer. How far its model checking goes is to
   be checked in the repository.
-- **batsat**: the SAT solver veryl-tbf's constrained random already uses
+- **batsat**: the SAT solver Verald's constrained random already uses
   behind its `SatSolver` trait (see
   [random-design.md](random-design.md#sat-solver)); enough for a BMC of
   its own.
@@ -684,8 +684,6 @@ for quick checks.
 - Assertions on module instances, with the host API and metadata above.
 - Structs generated from metadata.
 - Emitting SVA from the property IR.
-- The crate's name follows veryl-tbf's renaming; see
-  [the TODO in design.md](design.md#veryl-tbf).
 
 ## Decisions and rejected alternatives
 

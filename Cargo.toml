@@ -1,20 +1,34 @@
 [workspace]
-members = ["crates/*"]
+members = [
+    "crates/verald",
+    "crates/host",
+    "crates/macros",
+    "crates/macros/codegen",
+    "crates/random",
+    "crates/random/macros",
+    "crates/tb/core",
+    "crates/tb/runtime",
+    "crates/tb/macros",
+    "crates/tb/dpi",
+]
 resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/taichi-ishitani/veryl-tbf"
+repository = "https://github.com/taichi-ishitani/verald"
 # Not publishable yet: depends on unreleased Veryl (veryl-lang/veryl#3701).
 publish = false
 
 [workspace.dependencies]
-veryl-tbf-core = { path = "crates/veryl-tbf-core" }
-veryl-tbf-host = { path = "crates/veryl-tbf-host" }
-veryl-tbf-macros = { path = "crates/veryl-tbf-macros" }
-veryl-tbf-random = { path = "crates/veryl-tbf-random" }
-veryl-tbf-runtime = { path = "crates/veryl-tbf-runtime" }
+verald-host = { path = "crates/host" }
+verald-macros = { path = "crates/macros" }
+verald-macros-codegen = { path = "crates/macros/codegen" }
+verald-random = { path = "crates/random" }
+verald-random-macros = { path = "crates/random/macros" }
+verald-tb-core = { path = "crates/tb/core" }
+verald-tb-macros = { path = "crates/tb/macros" }
+verald-tb-runtime = { path = "crates/tb/runtime" }
 # Method reference arguments are not released yet (veryl-lang/veryl#3701).
 veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }

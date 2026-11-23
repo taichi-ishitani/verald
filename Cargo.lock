@@ -276,6 +276,108 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
+name = "verald"
+version = "0.1.0"
+dependencies = [
+ "verald-host",
+ "verald-random",
+ "verald-tb-core",
+ "verald-tb-runtime",
+]
+
+[[package]]
+name = "verald-host"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "smallvec",
+ "veryl-component",
+]
+
+[[package]]
+name = "verald-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.119",
+ "verald-host",
+ "verald-macros-codegen",
+]
+
+[[package]]
+name = "verald-macros-codegen"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "verald-random"
+version = "0.1.0"
+dependencies = [
+ "batsat",
+ "num-bigint",
+ "num-traits",
+ "verald-random-macros",
+]
+
+[[package]]
+name = "verald-random-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "verald-tb-core"
+version = "0.1.0"
+dependencies = [
+ "inventory",
+ "verald-random",
+ "verald-tb-macros",
+ "verald-tb-runtime",
+ "veryl-component",
+]
+
+[[package]]
+name = "verald-tb-dpi"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml",
+ "veryl-component",
+]
+
+[[package]]
+name = "verald-tb-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "verald-macros-codegen",
+]
+
+[[package]]
+name = "verald-tb-runtime"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "smallvec",
+ "verald-host",
+ "verald-macros",
+ "verald-random",
+ "verald-tb-macros",
+ "veryl-component",
+]
+
+[[package]]
 name = "veryl-component"
 version = "0.1.2"
 source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#37f252fbca5f592eead47bfdc8459bd73069ac55"
@@ -301,76 +403,6 @@ dependencies = [
 name = "veryl-component-sys"
 version = "0.1.2"
 source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#37f252fbca5f592eead47bfdc8459bd73069ac55"
-
-[[package]]
-name = "veryl-tbf"
-version = "0.1.0"
-dependencies = [
- "veryl-tbf-core",
- "veryl-tbf-random",
- "veryl-tbf-runtime",
-]
-
-[[package]]
-name = "veryl-tbf-core"
-version = "0.1.0"
-dependencies = [
- "inventory",
- "veryl-component",
- "veryl-tbf-macros",
- "veryl-tbf-random",
- "veryl-tbf-runtime",
-]
-
-[[package]]
-name = "veryl-tbf-dpi"
-version = "0.1.0"
-dependencies = [
- "serde",
- "toml",
- "veryl-component",
-]
-
-[[package]]
-name = "veryl-tbf-host"
-version = "0.1.0"
-dependencies = [
- "num-bigint",
- "smallvec",
- "veryl-component",
-]
-
-[[package]]
-name = "veryl-tbf-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "veryl-tbf-random"
-version = "0.1.0"
-dependencies = [
- "batsat",
- "num-bigint",
- "num-traits",
- "veryl-tbf-macros",
-]
-
-[[package]]
-name = "veryl-tbf-runtime"
-version = "0.1.0"
-dependencies = [
- "num-bigint",
- "smallvec",
- "veryl-component",
- "veryl-tbf-host",
- "veryl-tbf-macros",
- "veryl-tbf-random",
-]
 
 [[package]]
 name = "winnow"

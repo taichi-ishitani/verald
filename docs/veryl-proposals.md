@@ -1,12 +1,12 @@
 # Proposals to Veryl
 
-What veryl-tbf would want of Veryl and its component SDK (`veryl-component`):
+What Verald would want of Veryl and its component SDK (`veryl-component`):
 what it cannot do, or can do only by duplicating in Rust what Veryl already
 knows. Each proposal records the need, the shape proposed, and the
 alternatives set aside, with their reasons. A section marked as a study
 records an idea studied and not proposed, kept because other components
 may want it. The framework's own design is in
-[design.md](design.md); until a proposal is taken up, veryl-tbf works around
+[design.md](design.md); until a proposal is taken up, Verald works around
 it as the proposal says.
 
 The proposals refer to Veryl as of
@@ -25,7 +25,7 @@ The proposals refer to Veryl as of
 
 Filed as [veryl-lang/veryl#3716](https://github.com/veryl-lang/veryl/issues/3716),
 and implemented in [veryl-lang/veryl#3717](https://github.com/veryl-lang/veryl/pull/3717),
-which veryl-tbf uses (see "Runtime arguments" in [design.md](design.md)).
+which Verald uses (see "Runtime arguments" in [design.md](design.md)).
 
 So that values can be chosen when a test is run, not when it is written:
 which test to run (UVM's `+UVM_TESTNAME`), how many rounds, a verbosity.
@@ -168,7 +168,7 @@ let mask: u128 = ctx.runtime_arg_value("MASK")?.unwrap_or(!0);
   }
   ```
 
-veryl-tbf would read the test's name from an argument when `tb.start` is
+Verald would read the test's name from an argument when `tb.start` is
 given none, and print the arguments in its summary.
 
 ### On a SystemVerilog simulator
@@ -198,7 +198,7 @@ translation has to match the name exactly.
 
 **Not proposed.** Veryl keeps to its features as an HDL and keeps its
 specification small, so clocking stays on the components' side, as
-veryl-tbf implements it. What the simulator holding it would give over
+Verald implements it. What the simulator holding it would give over
 that is small:
 
 - Fewer per-signal costs: little, as a component already reads and writes
@@ -212,13 +212,13 @@ that is small:
 - Only these need the language: one sampling and driving semantics
   guaranteed by the simulator across components (today it rests on how
   the hooks are called), and skews (`input #1step`, `output #2`), which
-  need the simulator's time. veryl-tbf needs neither today.
+  need the simulator's time. Verald needs neither today.
 
 The study below is kept for components that may come to want it.
 
 Clocking is as useful to tests written in Veryl, and to other components,
-as to veryl-tbf, which was the case for Veryl and its simulator holding it
-rather than each testbench. veryl-tbf implements it on the component's
+as to Verald, which was the case for Veryl and its simulator holding it
+rather than each testbench. Verald implements it on the component's
 side: at every edge of a clock bound to it, Veryl calls the component's
 hook, and the component reads each input it needs and writes each output
 it changed, a host call (or a direct pointer access) per signal. The idea
@@ -275,7 +275,7 @@ tb.set_clocking("bus", bus.master_cb);   // passed by reference, as a modport is
   little as `$tb::clock_gen` offers: its members (`cb.member`) and
   `cb.next()` / `cb.next(n)` (drive the outputs, wait for the edge or `n`
   of them, sample the inputs). A wait on a condition is a loop
-  (`while !cb.ready { cb.next(); }`). veryl-tbf's richer waits
+  (`while !cb.ready { cb.next(); }`). Verald's richer waits
   (`tick_until!`, `posedge!`, `changed!`, with or without a limit) rest on
   what Rust has (`async`, closures, macros reading the condition, `Result`
   for a timeout) and stay in Rust, built on the wake conditions the SDK
@@ -343,7 +343,7 @@ definition and the layout is the same for every instance. Then:
   expansion `use(..)` names (see "Rust types generated from Veryl
   packages").
 
-With that, veryl-tbf's own `#[modport]` / `#[clocking]` structs, which a
+With that, Verald's own `#[modport]` / `#[clocking]` structs, which a
 user writes by hand today, go away.
 
 How the generation works:
@@ -410,7 +410,7 @@ returns having done nothing; with wake conditions those edges cost
 nothing. Where every cycle carries a transfer, the testbench's own work
 dominates and the gain is smaller. How much each saves is to be measured.
 
-### veryl-tbf with it
+### Verald with it
 
 - The clockings' structs come from `import!` (its own `#[modport]` /
   `#[clocking]` go), and `tick` knows its clock from the clocking; the
@@ -514,7 +514,7 @@ one conversion layer, the SDK's: a component's trait implemented for
 every type the SDK converts would conflict with its own impls for the
 primitives, since the SDK might add impls for them later.
 
-veryl-tbf would use it in two places, dropping its own conversions
+Verald would use it in two places, dropping its own conversions
 (`FromSetting`, `SignalValue`):
 
 - Settings: `setup_context.get::<T>(key)` unpacks the `Value` a test module
@@ -556,7 +556,7 @@ the struct's whole width, fields from the most significant bit in
 declaration order (tried with 24 and 600 bits; only a method's return
 value is limited, to 512 bits). Until the proposal, a testbench wanting a
 struct may define it on both sides and write a `FromSetting` that slices
-the `Value`; veryl-tbf adds no interim derive, which the SDK's would
+the `Value`; Verald adds no interim derive, which the SDK's would
 replace. Settings are otherwise set one value at a time.
 
 ### Set aside

@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-veryl-tbf = { path = "../../../crates/veryl-tbf" }
+verald = { path = "../../../crates/verald" }
 # The component derives refer to `::veryl_component`; the same revision as
 # the runtime's.
 veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }

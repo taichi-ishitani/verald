@@ -1,4 +1,4 @@
-# veryl-tbf design notes
+# Verald design notes
 
 A UVM-style verification framework in Rust for Veryl. This file records the
 decisions made so far, the reasons behind them, and what is still open.
@@ -21,6 +21,7 @@ marked "for now" record where the implementation stops short of the design.
 - [TLM and the sequencer](#tlm-and-the-sequencer)
 - [Executor](#executor)
 - [Runner](#runner)
+- [The name](#the-name)
 - [Crate layout](#crate-layout)
 - [Implementation notes](#implementation-notes)
 - [Taken from UVM](#taken-from-uvm)
@@ -1134,7 +1135,7 @@ Decided:
 
 ### Clocking blocks
 
-Decided (implemented in the runtime, the macros in `veryl-tbf-macros`); what
+Decided (implemented in the runtime, the macros in `verald-tb-macros`); what
 users see follows rustdv-veryl's clocking blocks:
 
 - A `#[clocking]` struct is a clocking block, as SystemVerilog's
@@ -1184,7 +1185,7 @@ users see follows rustdv-veryl's clocking blocks:
   up after a number of edges with a `ClockingTimeout`, which `?` turns into
   a fatal error naming the condition.
 - The macros' generated code names the runtime through the crate the user
-  depends on, `veryl-tbf` (as `veryl_tbf::runtime`) or `veryl-tbf-runtime`.
+  depends on, `verald` (as `verald::tb::runtime`) or `verald-tb-runtime`.
 - `run_with_reset(reset, state, on_reset, body)` is in the runtime: it runs
   `on_reset`, waits for the release, runs `body` until the next assertion
   (dropping it, with what it forked), and starts over.
@@ -1417,7 +1418,7 @@ Decided:
 
 - One test per simulation, as in UVM. With Veryl's simulator the test is
   named in the Veryl test module, as the argument of `start`
-  (`tb.start("RegTest")`), and the runtime argument `TBF_TESTNAME`
+  (`tb.start("RegTest")`), and the runtime argument `VERALD_TESTNAME`
   overrides it, as UVM's `+UVM_TESTNAME` does `run_test`'s (see "Runtime
   arguments" below). So one `#[test]` module, the harness every test
   shares, runs any test: `examples/regblock` has one, its tests and
@@ -1449,7 +1450,7 @@ Decided:
     [Tests](#tests).
   - The name is an identifier, and its text is the name `start` takes
     (`tb.start("SlowWriteTest")`). The macro also emits an item named from
-    it (`__TBF_TEST_SlowWriteTest`, so as not to clash with the type in the
+    it (`__VERALD_TEST_SlowWriteTest`, so as not to clash with the type in the
     one-argument form), so registering a name twice in one module does not
     compile. Names are CamelCase, as the one-argument form makes them type
     names.
@@ -1488,7 +1489,7 @@ Decided:
   - A default as UVM's (`UVM_DEFAULT_TIMEOUT`): 10,000,000 cycles, beyond
     any usual test, so that a hung one still ends now that the test module
     keeps its clocks running with no bound of its own (`clk.start()`). The
-    `timeout` option (`TBF_TIMEOUT`) sets a test's; `0` is no limit.
+    `timeout` option (`VERALD_TIMEOUT`) sets a test's; `0` is no limit.
 - Settings are given by the Veryl test module (the shared harness), which
   calls methods before `start`, as often as needed; runtime arguments
   override them where UVM's plusargs would (below). The framework's
@@ -1539,15 +1540,15 @@ Decided:
   the testbench's own settings:
 
   ```
-  veryl +local test -t regblock_test --runtime-arg=TBF_TESTNAME:ReverseTest --runtime-arg=TBF_LOG_LEVEL:debug
+  veryl +local test -t regblock_test --runtime-arg=VERALD_TESTNAME:ReverseTest --runtime-arg=VERALD_LOG_LEVEL:debug
   ```
 
   - The runtime takes a copy of them at `start`; they do not change during
     the run.
-  - Its own are under the `TBF_` prefix, in upper case as UVM's:
-    `TBF_TESTNAME:<name>` names the test over the name given to `start`
-    (UVM's `+UVM_TESTNAME`), and any other `TBF_<KEY>:<value>` is the option
-    `<key>` in lower case (`TBF_TIMEOUT`, `TBF_LOG_LEVEL`, a testbench's
+  - Its own are under the `VERALD_` prefix, in upper case as UVM's:
+    `VERALD_TESTNAME:<name>` names the test over the name given to `start`
+    (UVM's `+UVM_TESTNAME`), and any other `VERALD_<KEY>:<value>` is the option
+    `<key>` in lower case (`VERALD_TIMEOUT`, `VERALD_LOG_LEVEL`, a testbench's
     own), taken in the order given after the test module's, so the command
     line wins and the last of a name wins. An unknown key, or one given as
     a flag, fails the start as `tb.option` would: a misspelt one is not
@@ -1568,6 +1569,20 @@ Decided:
   `set_timeout` and `set_report_max_quit_count`), overridden by the test
   module's, is added when needed.
 
+## The name
+
+Decided: **Verald** (Verification + Emerald, after Veryl's Verilog +
+Beryl, the emerald being a variety of beryl), in place of veryl-tbf. With assertions planned (see
+[assertion-design.md](assertion-design.md)) beside the testbench and
+constrained random, and coverage likely later, "testbench framework" no
+longer covered what the project is; the name covers verification as a
+whole and serves as a short prefix for the crates and in paths
+(`verald::prelude`). Others considered: `veryl-verify` (plain, longer),
+`veryl-dv` (short, but close to rustdv and rustdv-veryl), `veryl-vf`
+(short, but unclear). The name was free on crates.io (`verald` and
+`verald-*`, checked on 2026-11-20). The runtime arguments and the DPI
+functions are prefixed `VERALD_` and `verald_`.
+
 ## Crate layout
 
 Decided: the event handling and the UVM-like methodology are separate crates
@@ -1576,14 +1591,32 @@ never the other way, so the runtime's per-edge path is kept apart from the
 methodology's needs, and the runtime alone serves small tests that need no
 hierarchy.
 
-| Crate | Contents |
+| Crate (directory) | Contents |
 |---|---|
-| `veryl-tbf` | the entry point users depend on: re-exports the others, with a prelude; `core` can be left out by a feature |
-| `veryl-tbf-host` | the host layer: the hook entry and its dispatch, the hook's context and services, panic detection, value conversion, typed signals and modports, `Signals` (see [host-layer-design.md](host-layer-design.md)) |
-| `veryl-tbf-runtime` | the executor, tasks and their concurrency (`fork_scope`, `join`, `first`), waits for clocks and resets (`run_with_reset`), the shared parts (`Fifo`, events, `Semaphore`), clocking blocks, the registrations and Veryl's adapter as a subscriber of the host layer, the timeout, unexpected finishes |
-| `veryl-tbf-core` | the UVM-like part: `Component`, `Test`, `Instance`, `Scope`, the phases, `Knob`, `Callbacks`, TLM, items (`ItemHandle`), sequences and sequencers, agents' and monitors' helpers, `ItemWaiter`, `Spec` / `BundledSpecs`, the runner (`register_test!`, test selection, reporting, the error limit) |
-| `veryl-tbf-macros` | the proc macros of both (`#[clocking]`, `#[modport]`, the wait macros; `#[component(..)]`, `#[sequence]`, `register_test!`; `bundled_specs!` is a `macro_rules!` of the core) |
-| `veryl-tbf-random` | constrained random; depends on nothing else here, so it can be used on its own |
+| `verald` (`crates/verald`) | the entry point users depend on: re-exports the others (`verald::host`, `verald::tb::{runtime, core}`, `verald::random`) with one prelude and `export!`; the parts are chosen by features (`tb` and `random` by default, `assert` later) |
+| `verald-host` (`crates/host`) | the host layer: the hook entry and its dispatch, the hook's context and services, panic detection, value conversion, typed signals and modports, `Signals` (see [host-layer-design.md](host-layer-design.md)) |
+| `verald-macros` (`crates/macros`) | the proc macros shared by the parts: `#[modport]` |
+| `verald-macros-codegen` (`crates/macros/codegen`) | a library: `#[modport]`'s code generation and the parts `#[clocking]` shares with it, as functions both macro crates call |
+| `verald-random` (`crates/random`) | constrained random; depends on nothing else here, so it can be used on its own |
+| `verald-random-macros` (`crates/random/macros`) | its proc macros (`#[randomize]`, `#[constraints]`, ..) |
+| `verald-tb-runtime` (`crates/tb/runtime`) | the executor, tasks and their concurrency (`fork_scope`, `join`, `first`), waits for clocks and resets (`run_with_reset`), the shared parts (`Fifo`, events, `Semaphore`), clocking blocks, the registrations and Veryl's adapter as a subscriber of the host layer (`testbench`), the timeout, unexpected finishes |
+| `verald-tb-core` (`crates/tb/core`) | the UVM-like part: `Component`, `Test`, `Instance`, `Scope`, the phases, `Knob`, `Callbacks`, TLM, items (`ItemHandle`), sequences and sequencers, agents' and monitors' helpers, `ItemWaiter`, `Spec` / `BundledSpecs`, the runner (`register_test!`, test selection, reporting, the error limit) |
+| `verald-tb-macros` (`crates/tb/macros`) | the testbench's proc macros (`#[clocking]`, the wait macros; `#[component(..)]`, `#[sequence]`, `register_test!`; `bundled_specs!` is a `macro_rules!` of the core) |
+| `verald-tb-dpi` (`crates/tb/dpi`) | a DPI host (a prototype) running a testbench on a SystemVerilog simulator; its functions call the testbench component's methods (`set_clock`, `start`, ..), so it belongs to the testbench |
+
+Decided: the directories group the crates by part. What the parts share is
+at the top (`host`, `macros`); a part's crates are under its directory
+(`tb/`, `random/`, later `assert/`), each with its own macros. A crate's
+name joins its path (`crates/tb/runtime` is `verald-tb-runtime`). The
+entry point is `verald` alone, with features, rather than an entry point
+per part as well (`verald-tb`): one `export!` covers a component holding
+several parts.
+
+`#[modport]` is shared (the assertions bind modports too), and kept apart
+from `#[clocking]`: structs for an interface's modports may come to be
+generated from Veryl's description (veryl-lang/veryl#3712, for packages so
+far), with `verald-macros-codegen` moved to Veryl's component SDK as the
+functions it is.
 
 What each side holds where they meet:
 
@@ -1599,7 +1632,7 @@ What each side holds where they meet:
 Static dispatch across the crates is kept with generics and `#[inline]`, so
 the split costs nothing per edge.
 
-The host layer (`veryl-tbf-host`) is below the runtime: what talks to
+The host layer (`verald-host`) is below the runtime: what talks to
 Veryl's host API, which the runtime and the assertions both build on. See
 [host-layer-design.md](host-layer-design.md).
 
@@ -1706,7 +1739,7 @@ Later:
 
 - `` `uvm_do ``-like macros (`start_item!`, `finish_item!`, `send_item!`,
   hiding `.await?`).
-- The register model (RAL): a crate of its own (`veryl-tbf-ral`), designed
+- The register model (RAL): a crate of its own (`verald-ral`), designed
   separately; models could come from rggen.
 - `uvm_barrier`; TLM1 put / get / peek ports and `uvm_tlm_fifo`;
   `grab` / `lock`; the response handler; `uvm_sequence_library`;
@@ -1717,7 +1750,7 @@ Later:
 ### Extensions from tue
 
 tue (the UVM extension library that the tvip VIPs are built on) adds to UVM
-what VIPs keep writing; veryl-tbf takes these in:
+what VIPs keep writing; Verald takes these in:
 
 | tue | Here |
 |---|---|
@@ -1741,22 +1774,7 @@ None at present; deferred work is under [TODO](#todo).
 
 ## TODO
 
-### veryl-tbf
-
-- Renaming the project: with assertions planned (see
-  [assertion-design.md](assertion-design.md)), beside the testbench and
-  constrained random, and coverage likely later, "testbench framework" no
-  longer covers what the project is. The name is to cover verification as
-  a whole, and to serve as a short prefix for the crates (`<name>-runtime`,
-  `<name>-random`, `<name>-assert`) and in paths (`<name>::prelude`).
-  The candidate is **Verald**: Verification + Emerald, after Veryl's
-  Verilog + Beryl (the emerald being a variety of beryl); it also recalls
-  Vera, a forerunner of SystemVerilog's verification features. Others
-  considered: `veryl-verify` (plain, longer), `veryl-dv` (short, but close
-  to rustdv and rustdv-veryl), `veryl-vf` (short, but unclear). The name
-  is free on crates.io (`verald` and `verald-*`, checked on 2026-11-20);
-  GitHub is not checked yet. To be done when
-  the assertions' proof of concept starts.
+### Verald
 
 - Drain time: a wait between the test's `run` returning and the end of the
   run phase (UVM's `set_drain_time`), in time or in clock edges. Not needed
@@ -1803,5 +1821,5 @@ framework:
 
 ### Proposals to Veryl
 
-What veryl-tbf would want of Veryl is kept apart, in
+What Verald would want of Veryl is kept apart, in
 [veryl-proposals.md](veryl-proposals.md).

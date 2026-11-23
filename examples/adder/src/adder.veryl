@@ -59,7 +59,7 @@ module adder_test {
         bus           ,
         o_count: count,
     );
-    inst tb : $comp::tbf_adder;
+    inst tb : $comp::verald_adder;
 
     initial {
         tb.set_clock("clk", clk);

@@ -1,9 +1,19 @@
-# veryl-tbf
+# Verald
 
-A UVM-style verification framework for [Veryl](https://github.com/veryl-lang/veryl)'s
-built-in simulator, written in Rust. A testbench is a Rust crate that Veryl
-loads as a verification component; its tests are started from a Veryl
-`#[test]` module.
+Verification for [Veryl](https://github.com/veryl-lang/veryl) in Rust, on
+Veryl's built-in simulator. Verald brings what SystemVerilog offers for
+verification to Veryl, while Veryl itself stays an RTL language: its parts
+are Rust crates that Veryl loads as verification components.
+
+- **A UVM-style testbench**: components, phases, sequences, TLM and
+  clocking blocks; its tests are started from a Veryl `#[test]` module.
+- **Constrained random**: SystemVerilog's `rand`, `constraint` and
+  `randomize()` on Rust structs, usable on its own.
+- **Assertions** (planned): SVA-like properties over the design's signals,
+  evaluated by a component.
+
+The name is Verification + Emerald, after Veryl's Verilog + Beryl: the
+emerald is a variety of beryl.
 
 > **Status:** in development and not released. It depends on unreleased
 > Veryl: [veryl-lang/veryl#3701](https://github.com/veryl-lang/veryl/pull/3701)
@@ -13,7 +23,12 @@ loads as a verification component; its tests are started from a Veryl
 > [taichi-ishitani/veryl](https://github.com/taichi-ishitani/veryl/tree/tbf),
 > run as `veryl +local`.
 
-## Features
+## Testbench
+
+A testbench is a Rust crate (a `cdylib`) exporting one component, which a
+Veryl `#[test]` module instantiates: the module registers the clocks,
+resets and interfaces with it and starts a test by name, as UVM's
+`run_test`.
 
 - **Components and phases**: a typed hierarchy built in `build`, a
   concurrent `run` phase on a single-threaded executor, then `check` and
@@ -30,16 +45,12 @@ loads as a verification component; its tests are started from a Veryl
   reactive for slaves.
 - **Clocking blocks**: `#[modport]` / `#[clocking]` structs that sample
   inputs and drive outputs at a clock edge, with `tick!` and wait macros.
-- **Constrained random**: SystemVerilog's `rand`, `constraint` and
-  `randomize()` on Rust structs, solved with a SAT solver; constraints may
-  read a configuration (`#[randomize(context = ..)]`). Seeds follow UVM's
-  random stability: every component and sequence has its own, derived from
-  Veryl's seed (`veryl test --seed`).
+  Signals are two-state and read and written without a call to the host.
 - **Reporting**: log levels with a threshold, errors, an error limit, a
   timeout, and a summary with the seed and the runtime arguments.
 - **Runtime arguments**: `veryl test --runtime-arg=..` chooses the test
-  (`TBF_TESTNAME`, as UVM's `+UVM_TESTNAME`) and the options
-  (`TBF_TIMEOUT`, `TBF_LOG_LEVEL`, ..), and a test reads its own
+  (`VERALD_TESTNAME`, as UVM's `+UVM_TESTNAME`) and the options
+  (`VERALD_TIMEOUT`, `VERALD_LOG_LEVEL`, ..), and a test reads its own
   (`runtime_arg_value::<u32>("ROUNDS")`).
 - **SystemVerilog simulators** (a prototype): the same testbench, built
   with a `dpi` feature, runs on a SystemVerilog simulator through DPI,
@@ -49,10 +60,8 @@ loads as a verification component; its tests are started from a Veryl
 Configuration is typed and passed down the hierarchy; there is no
 string-keyed configuration database.
 
-## A first look
-
 ```rust
-use veryl_tbf::prelude::*;
+use verald::prelude::*;
 
 /// Drives each item the sequencer hands it.
 #[component(driver)]
@@ -96,7 +105,7 @@ impl Component for RegTest {
 }
 
 register_test!(RegTest);
-veryl_tbf::export!("tbf_regblock");
+verald::export!("verald_regblock");
 ```
 
 ```veryl
@@ -106,7 +115,7 @@ module regblock_test {
     inst rst: $tb::reset_gen (clk);
     inst bus: bus_if;
     inst dut: regblock (i_clk: clk, i_rst: rst, bus: bus.slave);
-    inst tb : $comp::tbf_regblock;
+    inst tb : $comp::verald_regblock;
 
     initial {
         tb.set_clock("clk", clk);
@@ -122,23 +131,67 @@ module regblock_test {
 The [walkthrough](docs/walkthrough.md) reads a whole testbench,
 `examples/regblock`, from the DUT to the output.
 
+## Constrained random
+
+SystemVerilog's random model on plain Rust structs, solved with a SAT
+solver: `#[rand]` fields, constraints written as functions in Rust syntax,
+`randomize()` and `randomize_with!`, constraint sets, `randcase!` and
+`std_randomize!`. Constraints may read a configuration
+(`#[randomize(context = ..)]`). Within a testbench, seeds follow UVM's
+random stability: every component and sequence has its own, derived from
+Veryl's seed (`veryl test --seed`).
+
+```rust
+use verald::random::{constraints, randomize, randomize_with};
+
+#[randomize]
+#[derive(Clone, Default)]
+struct AluCmd {
+    #[rand] a: u8,
+    #[rand] b: u8,
+    limit: u8,                        // state: a constant while solving
+}
+
+#[constraints]
+impl AluCmd {
+    fn ranges() {
+        a != 0;
+        b < limit;
+    }
+}
+
+let mut cmd = AluCmd { limit: 8, ..Default::default() };
+cmd.randomize()?;
+randomize_with!(cmd, { a < 16; })?;
+```
+
+See [docs/random.md](docs/random.md).
+
+## Assertions (planned)
+
+SVA-like concurrent assertions over the design's signals, written in Rust
+against the Veryl source and evaluated by a component at each clock edge;
+first on the test module's signals, later on every instance of a module.
+See the design study, [docs/assertion-design.md](docs/assertion-design.md).
+
 ## Getting started
 
 1. Build Veryl from the `tbf` branch of taichi-ishitani/veryl and install
    it as `local` (`verylup install local` in the Veryl repository).
-2. Add a Rust crate for the testbench to the Veryl project, a `cdylib`
-   depending on `veryl-tbf` and on `veryl-component` (the derives name
-   it), from the same revision of Veryl:
+2. Add a Rust crate for the components to the Veryl project, a `cdylib`
+   depending on `verald` and on `veryl-component` (the derives name it),
+   from the same revision of Veryl:
 
    ```toml
    [lib]
    crate-type = ["cdylib"]
 
    [dependencies]
-   veryl-tbf = { git = "https://github.com/taichi-ishitani/veryl-tbf" }
+   verald = { git = "https://github.com/taichi-ishitani/verald" }
    veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
    ```
 
+   `verald`'s features choose the parts: `tb` and `random` by default.
    Fetching the git dependencies may need `CARGO_NET_GIT_FETCH_WITH_CLI=true`.
 3. Register it in `Veryl.toml`:
 
@@ -149,14 +202,14 @@ The [walkthrough](docs/walkthrough.md) reads a whole testbench,
 
 4. In the crate, write the components and tests, register each test with
    `register_test!`, and export the testbench once with
-   `veryl_tbf::export!("name")`; it is instantiated as `$comp::name`.
+   `verald::export!("name")`; it is instantiated as `$comp::name`.
 5. In a `#[test]` module, register the clocks, resets and interfaces, give
    options (`tb.option`) and settings (`tb.set`), and start a test by its
    registered name (`tb.start`).
 6. Run `veryl +local test`. Runtime arguments override the test module:
-   `--runtime-arg=TBF_TESTNAME:<test>` starts another test, and
-   `--runtime-arg=TBF_<OPTION>:<value>` sets an option
-   (`TBF_LOG_LEVEL:debug`); a test reads its own with `runtime_arg_value`.
+   `--runtime-arg=VERALD_TESTNAME:<test>` starts another test, and
+   `--runtime-arg=VERALD_<OPTION>:<value>` sets an option
+   (`VERALD_LOG_LEVEL:debug`); a test reads its own with `runtime_arg_value`.
 
 ## Examples
 
@@ -166,9 +219,9 @@ by a runtime argument.
 
 | Example | Shows |
 |---|---|
-| [`examples/regblock`](examples/regblock) | the methodology: a register block on a valid/ready bus, a generated agent, a scoreboard, sequences, tests made from scenarios, constrained random. See the [walkthrough](docs/walkthrough.md) |
-| [`examples/adder`](examples/adder) | the runtime alone: a clocking block driving an adder and checking its sums |
-| [`examples/hooks`](examples/hooks) | the runtime alone: how the simulator calls the testbench around a reset |
+| [`examples/regblock`](examples/regblock) | the testbench's methodology: a register block on a valid/ready bus, a generated agent, a scoreboard, sequences, tests made from scenarios, constrained random. See the [walkthrough](docs/walkthrough.md) |
+| [`examples/adder`](examples/adder) | the testbench's runtime alone: a clocking block driving an adder and checking its sums |
+| [`examples/hooks`](examples/hooks) | the testbench's runtime alone: how the simulator calls the testbench around a reset |
 
 `examples/adder/verilator` runs the adder's test on Verilator instead,
 through the DPI host (`make` there; `make run SEED=5`, `make clean`): a
@@ -177,31 +230,39 @@ feature.
 
 ## Crates
 
-| Crate | Contents |
-|---|---|
-| `veryl-tbf` | the entry point: re-exports the others, with a prelude and `export!` |
-| `veryl-tbf-host` | the host layer: what talks to Veryl's host API (hooks, services, typed signals), shared by the runtime and the assertions |
-| `veryl-tbf-runtime` | the executor, tasks and their concurrency, clocks and resets, clocking blocks, the registrations |
-| `veryl-tbf-core` | the UVM-like methodology: components, phases, tests, TLM, sequences, sequencers, agents, reporting |
-| `veryl-tbf-macros` | the procedural macros of the others |
-| `veryl-tbf-random` | constrained random; usable on its own |
-| `veryl-tbf-dpi` | a DPI host (a prototype): runs a testbench on a SystemVerilog simulator; its SystemVerilog side is [`dpi/tbf_dpi_pkg.sv`](dpi/tbf_dpi_pkg.sv) |
+The directories group the crates by part: what the parts share is at the
+top, a part's crates are under its directory.
+
+| Crate | Directory | Contents |
+|---|---|---|
+| `verald` | `crates/verald` | the entry point: re-exports the others (`verald::host`, `verald::tb`, `verald::random`) with a prelude and `export!`; parts chosen by features |
+| `verald-host` | `crates/host` | the host layer: what talks to Veryl's host API (hooks, services, typed signals), shared by the parts |
+| `verald-macros` | `crates/macros` | the shared proc macros: `#[modport]` |
+| `verald-macros-codegen` | `crates/macros/codegen` | `#[modport]`'s code generation and the parts `#[clocking]` shares with it |
+| `verald-random` | `crates/random` | constrained random, usable on its own |
+| `verald-random-macros` | `crates/random/macros` | its proc macros |
+| `verald-tb-runtime` | `crates/tb/runtime` | the testbench's runtime: the executor, tasks and their concurrency, clocks and resets, clocking blocks, the registrations |
+| `verald-tb-core` | `crates/tb/core` | the testbench's UVM-like methodology: components, phases, tests, TLM, sequences, sequencers, agents, reporting |
+| `verald-tb-macros` | `crates/tb/macros` | the testbench's proc macros (`#[clocking]`, waits, `#[component]`, `#[sequence]`, `register_test!`) |
+| `verald-tb-dpi` | `crates/tb/dpi` | a DPI host (a prototype): runs a testbench on a SystemVerilog simulator; its SystemVerilog side is [`verald_dpi_pkg.sv`](crates/tb/dpi/verald_dpi_pkg.sv) |
 
 ## Documents
 
-- [docs/walkthrough.md](docs/walkthrough.md): a testbench read from end to end.
 - [docs/design.md](docs/design.md): the design, with the reasons behind it
   and what was taken from UVM.
-- [docs/random.md](docs/random.md): constrained random, as users write it;
-  [docs/random-design.md](docs/random-design.md): its implementation.
 - [docs/host-layer-design.md](docs/host-layer-design.md): the layer over
-  Veryl's host API, shared by the runtime and the assertions.
-- [docs/assertion-design.md](docs/assertion-design.md): assertions, a
+  Veryl's host API, shared by the parts.
+- Testbench:
+  - [docs/walkthrough.md](docs/walkthrough.md): a testbench read from end
+    to end.
+  - [docs/sv-simulators.md](docs/sv-simulators.md): running a testbench on
+    a SystemVerilog simulator, through DPI.
+- Constrained random: [docs/random.md](docs/random.md), as users write it;
+  [docs/random-design.md](docs/random-design.md), its implementation.
+- Assertions: [docs/assertion-design.md](docs/assertion-design.md), a
   design study.
-- [docs/veryl-proposals.md](docs/veryl-proposals.md): what veryl-tbf would
+- [docs/veryl-proposals.md](docs/veryl-proposals.md): what Verald would
   want of Veryl.
-- [docs/sv-simulators.md](docs/sv-simulators.md): running a testbench on a
-  SystemVerilog simulator, through DPI.
 
 ## License
 

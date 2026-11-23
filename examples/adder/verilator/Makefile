@@ -1,16 +1,16 @@
-# Runs the adder's test on Verilator through veryl-tbf's DPI host: builds the
+# Runs the adder's test on Verilator through verald's DPI host: builds the
 # testbench with the `dpi` feature, the design's SystemVerilog with Veryl,
 # and the simulation with Verilator.
 #
 #   make              build and run
-#   make run SEED=5   with a seed (`+tbf_seed`)
+#   make run SEED=5   with a seed (`+verald_seed`)
 #   make clean        remove what the build made
 
 COMPONENT := ../component
 LIB_DIR   := $(abspath $(COMPONENT)/target/debug)
 LIB       := $(LIB_DIR)/libadder_tb.so
 DESIGN    := ../src/adder.sv
-DPI_PKG   := ../../../dpi/tbf_dpi_pkg.sv
+DPI_PKG   := ../../../crates/tb/dpi/verald_dpi_pkg.sv
 SIM       := obj_dir/vtop
 SEED      ?= 1
 
@@ -19,7 +19,7 @@ SEED      ?= 1
 all: run
 
 run: $(SIM)
-	./$(SIM) +tbf_seed=$(SEED)
+	./$(SIM) +verald_seed=$(SEED)
 
 # Cargo and Veryl decide themselves whether anything changed.
 lib:

@@ -1,11 +1,11 @@
-# Constrained random (`veryl_tbf::random`)
+# Constrained random (`verald::random`)
 
 > This is the user-facing specification: how to write random structs and
 > constraints, and what they mean. How it is implemented, and why the
 > design is as it is, is in [random-design.md](random-design.md).
 
 SystemVerilog verification depends on `rand` variables, `constraint`
-blocks and `randomize()`. This crate (`veryl-tbf-random`, re-exported as `veryl_tbf::random`)
+blocks and `randomize()`. This crate (`verald-random`, re-exported as `verald::random`)
 gives a testbench the same
 model on plain Rust structs:
 
@@ -36,7 +36,7 @@ few places (see [semantics](#semantics)).
 ## A first example
 
 ```rust
-use veryl_tbf::random::{constraints, randomize, randomize_with};
+use verald::random::{constraints, randomize, randomize_with};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, RandEnum)]
 enum Op { #[default] Add, Sub, Mul }
@@ -218,7 +218,7 @@ Notes:
   functions. `bit_not(a)` is the bitwise complement at the width of `a`;
   Rust has no `~` operator, and `!` is the logical NOT here (see
   [semantics](#semantics)). `bit_not` is also a public function of
-  `veryl_tbf::random`, for Rust code.
+  `verald::random`, for Rust code.
 
 ### Functions in constraints
 
@@ -337,7 +337,7 @@ randomize_with!(burst, &cfg, { len == context.max_len - 1; })?;
 - A nested `#[rand]` object with a context gets its parent's (the same
   type). If the parent has none, `randomize()` fails with `Invalid`,
   naming the context's type.
-- Within a veryl-tbf sequence, `self.randomize_item(&mut item)?` passes the
+- Within a Verald sequence, `self.randomize_item(&mut item)?` passes the
   sequencer's configuration (see [Use in sequences](#use-in-sequences)).
 
 ## Constraint sets: reuse and variation
@@ -507,7 +507,7 @@ These two are ordinary Rust methods, run as Rust code.
 `randomize()` takes no random number generator argument. Results are
 reproducible from the test seed, and independent per object, as in SV:
 
-- Within veryl-tbf, every component and every started sequence has its
+- Within Verald, every component and every started sequence has its
   own seed source (a `SeedSource`), made from the test's seed (Veryl's,
   `veryl test --seed`) and its names, as UVM seeds a component from its
   type name and path. Objects randomized while the component builds or
@@ -516,7 +516,7 @@ reproducible from the test seed, and independent per object, as in SV:
   seeded by hand.
 - Used on its own, the crate keeps a seed source per thread (SV: the
   thread's RNG): seed it at the start with `random::set_seed(seed)`;
-  unseeded, it starts from `VERYL_TBF_RANDOM_SEED` (or 1), once per
+  unseeded, it starts from `VERALD_RANDOM_SEED` (or 1), once per
   thread. A framework enters a source of its own with
   `SeedSource::enter` or `seeded(source, future)`.
 - On its first `randomize()`, an object takes a seed from that source
@@ -572,7 +572,7 @@ and in a component's `run`.
 | `randsequence` | *later* |
 
 These take from the same seed source (the entered one within
-veryl-tbf).
+Verald).
 
 Solving settings, per thread:
 
@@ -631,7 +631,7 @@ not a goal.
   that width are dropped. When the operands differ in width, the
   narrower one is extended (sign-extended if signed). The bitwise
   complement, which Rust writes `!a` and SV `~a`, is written
-  `bit_not(a)` (`veryl_tbf::random::bit_not`).
+  `bit_not(a)` (`verald::random::bit_not`).
 - **Integer literals** take the smallest width that holds their value;
   there is no SV 32-bit default for unsized literals.
 - **`/` and `%`** truncate toward zero, as in Rust. An assignment that

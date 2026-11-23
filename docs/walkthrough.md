@@ -2,7 +2,7 @@
 
 This walkthrough reads a whole testbench, from the design under test to
 the output of a run: `examples/regblock`, a register block on a simple
-bus. It shows how the parts of veryl-tbf fit together; the reasons behind
+bus. It shows how the parts of Verald fit together; the reasons behind
 them are in [design.md](design.md), and constrained random in
 [random.md](random.md).
 
@@ -20,7 +20,7 @@ examples/regblock/
 
 Run it with `veryl +local test` in `examples/regblock`; the test and the
 options are given as runtime arguments
-(`--runtime-arg=TBF_TESTNAME:ReverseTest`, see section 2). `make` there
+(`--runtime-arg=VERALD_TESTNAME:ReverseTest`, see section 2). `make` there
 runs every test, one after another (`make ReverseTest` one, `make SEED=5`
 with a seed, `make ARGS=..` with more arguments).
 
@@ -66,7 +66,7 @@ three.
 
 ## 2. The test module
 
-A test module instantiates the DUT and the testbench, `$comp::tbf_regblock`,
+A test module instantiates the DUT and the testbench, `$comp::verald_regblock`,
 the name the crate exports. Then, in `initial`, it tells the testbench
 what it needs and starts a test:
 
@@ -81,7 +81,7 @@ module regblock_test {
         i_rst: rst       ,
         bus  : bus.slave ,
     );
-    inst tb : $comp::tbf_regblock;
+    inst tb : $comp::verald_regblock;
 
     initial {
         tb.set_clock("clk", clk);               // registered under a name
@@ -101,7 +101,7 @@ module regblock_test {
   the clock running until the test ends: the testbench ends the simulation
   when the test is done, so the test module sets no number of cycles. A
   hung test is ended by the framework's timeout (10,000,000 cycles of the
-  first clock registered, by default; `TBF_TIMEOUT` below). A `$finish`
+  first clock registered, by default; `VERALD_TIMEOUT` below). A `$finish`
   in the test module reached while the test still runs is reported as an
   unexpected finish.
 
@@ -110,17 +110,17 @@ framework's options, are given when it runs, as runtime arguments, as
 UVM's `+UVM_*` plusargs:
 
 ```text
-veryl +local test --runtime-arg=TBF_TESTNAME:ReverseTest --runtime-arg=TBF_TIMEOUT:100000
+veryl +local test --runtime-arg=VERALD_TESTNAME:ReverseTest --runtime-arg=VERALD_TIMEOUT:100000
 ```
 
-- `TBF_TESTNAME` names the test over the one given to `start`: the
+- `VERALD_TESTNAME` names the test over the one given to `start`: the
   testbench has `BasicTest`, `ReverseTest` and `RandomTest`; `BasicTest`
   runs when none is named.
-- `TBF_<OPTION>` sets an option of the framework: `TBF_TIMEOUT` (the
-  cycles the test must end within; `0` for no limit), `TBF_LOG_LEVEL` (`error` .. `trace`, `info` by
-  default), `TBF_MAX_ERRORS`. A test module may also give options with
+- `VERALD_<OPTION>` sets an option of the framework: `VERALD_TIMEOUT` (the
+  cycles the test must end within; `0` for no limit), `VERALD_LOG_LEVEL` (`error` .. `trace`, `info` by
+  default), `VERALD_MAX_ERRORS`. A test module may also give options with
   `tb.option(key, value)`; a runtime argument overrides it.
-- A misspelt one (`TBF_LOG_LEVL`) fails the test, listing the options.
+- A misspelt one (`VERALD_LOG_LEVL`) fails the test, listing the options.
 - Arguments without the prefix are the tests' own: `ROUNDS:4` sets how
   many times `BasicTest` writes and reads every register (2 by default;
   see [section 7](#7-the-base-test)).
@@ -134,7 +134,7 @@ veryl +local test --runtime-arg=TBF_TESTNAME:ReverseTest --runtime-arg=TBF_TIMEO
 path = "component"
 ```
 
-The crate is a `cdylib` depending on `veryl-tbf` and on `veryl-component`,
+The crate is a `cdylib` depending on `verald` and on `veryl-component`,
 which the derives behind `export!` name:
 
 ```toml
@@ -142,7 +142,7 @@ which the derives behind `export!` name:
 crate-type = ["cdylib"]
 
 [dependencies]
-veryl-tbf = { path = "../../../crates/veryl-tbf" }
+verald = { path = "../../../crates/verald" }
 veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
 ```
 
@@ -150,7 +150,7 @@ veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "
 exports the testbench once:
 
 ```rust
-use veryl_tbf::prelude::*;
+use verald::prelude::*;
 
 // .. the VIP, the testbench and the tests ..
 
@@ -158,7 +158,7 @@ register_test!(BasicTest);
 register_test!(ReverseTest);
 register_test!(RandomTest);
 
-veryl_tbf::export!("tbf_regblock");   // $comp::tbf_regblock
+verald::export!("verald_regblock");   // $comp::verald_regblock
 ```
 
 ## 4. The bus VIP
@@ -809,7 +809,7 @@ time.
   count of messages of each severity, including those not printed.
 - The summary also lists the runtime arguments given, when there are
   some, so a log shows how its run was made.
-- With `--runtime-arg=TBF_LOG_LEVEL:debug`, the hierarchy is printed when
+- With `--runtime-arg=VERALD_LOG_LEVEL:debug`, the hierarchy is printed when
   the test starts:
 
   ```text
