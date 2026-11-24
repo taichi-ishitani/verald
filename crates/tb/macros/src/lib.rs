@@ -47,7 +47,9 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// fields `base` (`#[sequence(sequencer = ApbSequencer, base = ApbSeqBase)]`):
 /// inserts the core's fields and the base, implements `SequenceCore` and
 /// `HasBase`, and generates `new` over the struct's own fields. The struct's
-/// `impl Sequence` gives the body.
+/// `impl Sequence` gives the body. With `proxy`, a sequence with no body
+/// (no `impl Sequence`) for calling the protocol's methods from a test:
+/// `new` takes the sequencer first and starts the proxy on it.
 #[proc_macro_attribute]
 pub fn sequence(attr: TokenStream, item: TokenStream) -> TokenStream {
     expand(component::sequence(attr.into(), item.into()))
@@ -71,6 +73,16 @@ pub fn sequence_item(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn register_test(input: TokenStream) -> TokenStream {
     expand(test::register_test(input.into()))
+}
+
+/// Makes an `async fn` a test made from a base test, its `run` the
+/// function: `#[testcase(base = RegTest)] async fn basic(test: &mut RegTest,
+/// run_context: &mut RunContext) -> Result<(), TestError>`. Registers it
+/// under the function's name in CamelCase (`Basic`), the name of the test's
+/// struct; `name = ..` gives another, `spec = ..` a spec.
+#[proc_macro_attribute]
+pub fn testcase(attr: TokenStream, item: TokenStream) -> TokenStream {
+    expand(test::testcase(attr.into(), item.into()))
 }
 
 fn expand(r: syn::Result<TokenStream2>) -> TokenStream {

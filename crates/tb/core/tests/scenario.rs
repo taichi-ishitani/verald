@@ -1,5 +1,6 @@
-//! A test's three run steps, and tests made from a base test and scenarios
-//! by `#[component(test(base = .., ..))]`.
+//! A test's three run steps, tests made from a base test and scenarios by
+//! `#[component(test(base = .., ..))]`, and tests made from functions by
+//! `#[testcase]`.
 
 use std::cell::RefCell;
 
@@ -177,6 +178,28 @@ impl OwnStepsTest {
     }
 }
 
+/// A test as a function: its `run`, on the base.
+#[testcase(base = BaseTest)]
+async fn plain_case(test: &mut BaseTest, run_context: &mut RunContext) -> Result<(), TestError> {
+    test.clk.edge().await;
+    log(format!(
+        "testcase ({}, in {})",
+        test.label,
+        run_context.path()
+    ));
+    Ok(())
+}
+
+/// Named, and with a spec for the base.
+#[testcase(base = BaseTest, name = NamedCase, spec = Labelled)]
+async fn labelled_case(
+    test: &mut BaseTest,
+    _run_context: &mut RunContext,
+) -> Result<(), TestError> {
+    log(format!("labelled testcase ({})", test.label));
+    Ok(())
+}
+
 register_test!(BaseTest);
 register_test!(OwnStepsTest);
 register_test!(BodyTest);
@@ -275,6 +298,35 @@ fn a_test_made_from_a_base_may_write_its_steps_as_methods() {
             "base post_run",
             "check child",
             "check OwnStepsTest",
+        ]
+    );
+}
+
+#[test]
+fn a_testcase_is_the_run_of_a_test_made_from_its_base() {
+    assert_eq!(
+        run("PlainCase"),
+        [
+            "base pre_run",
+            "testcase (plain, in PlainCase)",
+            "base post_run",
+            "check child",
+            "check PlainCase",
+        ]
+    );
+}
+
+#[test]
+fn a_testcase_takes_a_name_and_a_spec() {
+    assert_eq!(
+        run("NamedCase"),
+        [
+            "post_build labelled",
+            "base pre_run",
+            "labelled testcase (labelled)",
+            "base post_run",
+            "check child",
+            "check NamedCase",
         ]
     );
 }

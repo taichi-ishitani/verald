@@ -1,6 +1,6 @@
 //! Sequences: the body the user writes (`Sequence`), the core the framework
-//! gives every sequence (`SequenceCore`, implemented by `#[sequence]`), and
-//! a protocol's fields (`HasBase`).
+//! gives every sequence (`SequenceCore`, implemented by `#[sequence]`),
+//! and a protocol's fields (`HasBase`).
 
 use std::cell::Ref;
 
@@ -14,7 +14,8 @@ use crate::item::ItemHandle;
 use crate::seeds;
 use crate::sequencer::{Sequencer, SequencerHandle};
 
-/// What a sequence does: its body. The rest is `SequenceCore`.
+/// What a sequence does: its body. The rest is `SequenceCore`, whose
+/// `start` runs it.
 pub trait Sequence {
     async fn body(&mut self) -> Result<(), TestError>;
 }
@@ -29,6 +30,21 @@ pub struct SequenceFields<S: Sequencer> {
     token: Option<u64>,
 }
 
+impl<S: Sequencer> SequenceFields<S> {
+    /// A proxy's fields: started on `sequencer` when made.
+    pub fn __started(sequencer: &SequencerHandle<S>) -> Self {
+        assert!(
+            sequencer.is_bound(),
+            "a proxy is made on an unbound sequencer handle"
+        );
+        SequenceFields {
+            sequencer: sequencer.clone(),
+            sequence_id: sequencer.core().new_sequence_id(),
+            ..SequenceFields::default()
+        }
+    }
+}
+
 impl<S: Sequencer> Default for SequenceFields<S> {
     fn default() -> Self {
         SequenceFields {
@@ -41,9 +57,13 @@ impl<S: Sequencer> Default for SequenceFields<S> {
     }
 }
 
-/// The core of every sequence (UVM's `uvm_sequence_base`): starting it on a
-/// sequencer, and sending items through it. `#[sequence]` implements it.
-pub trait SequenceCore: Sequence + Sized {
+/// The core of every sequence (UVM's `uvm_sequence_base`): what it is to
+/// its sequencer (an id, a priority) and sending items through it.
+/// `#[sequence]` implements it; a sequence with a body (a `Sequence`) is
+/// started with `start`. A protocol's methods are written over it, so a
+/// proxy (`#[sequence(.., proxy)]`), a sequence with no body, has them
+/// too, and cannot be started.
+pub trait SequenceCore: Sized {
     /// The sequencer the sequence runs on.
     type Sequencer: Sequencer;
     /// The sequence's type name, for arbiters and messages.
@@ -54,10 +74,12 @@ pub trait SequenceCore: Sequence + Sized {
     #[doc(hidden)]
     fn __fields_mut(&mut self) -> &mut SequenceFields<Self::Sequencer>;
 
-    /// Sets the priority before the sequence starts; one left unset takes
-    /// its parent's (`start_from`), else 100.
+    /// Sets the priority: before a sequence starts (one left unset takes
+    /// its parent's, `start_from`, else 100), or at any time on a proxy.
     fn set_priority(&mut self, priority: i32) {
-        self.__fields_mut().priority = Some(priority);
+        let fields = self.__fields_mut();
+        fields.priority = Some(priority);
+        fields.effective_priority = priority;
     }
 
     /// The priority it runs with, once started.
@@ -70,11 +92,12 @@ pub trait SequenceCore: Sequence + Sized {
         self.__fields().sequence_id
     }
 
-    /// Starts the sequence on `sequencer` and runs its body.
-    async fn start(
-        &mut self,
-        sequencer: &SequencerHandle<Self::Sequencer>,
-    ) -> Result<(), TestError> {
+    /// Starts the sequence on `sequencer` and runs its body: a sequence
+    /// with a body only, not a proxy.
+    async fn start(&mut self, sequencer: &SequencerHandle<Self::Sequencer>) -> Result<(), TestError>
+    where
+        Self: Sequence,
+    {
         self.__start(sequencer, None).await
     }
 
@@ -84,7 +107,10 @@ pub trait SequenceCore: Sequence + Sized {
         &mut self,
         sequencer: &SequencerHandle<Self::Sequencer>,
         parent: &P,
-    ) -> Result<(), TestError> {
+    ) -> Result<(), TestError>
+    where
+        Self: Sequence,
+    {
         self.__start(sequencer, Some(parent.priority())).await
     }
 
@@ -93,7 +119,10 @@ pub trait SequenceCore: Sequence + Sized {
         &mut self,
         sequencer: &SequencerHandle<Self::Sequencer>,
         parent_priority: Option<i32>,
-    ) -> Result<(), TestError> {
+    ) -> Result<(), TestError>
+    where
+        Self: Sequence,
+    {
         if !sequencer.is_bound() {
             return Err(TestError::new(format!(
                 "`{}` is started on an unbound sequencer handle",

@@ -277,6 +277,11 @@ pub trait BusSequence: SequenceCore<Sequencer = BusSequencer> + HasBase<BusSeqBa
 
 impl<S> BusSequence for S where S: SequenceCore<Sequencer = BusSequencer> + HasBase<BusSeqBase> {}
 
+/// The bus as a BFM: a sequence with no body, on which a test calls
+/// `BusSequence`'s `write` and `read` as tasks.
+#[sequence(sequencer = BusSequencer, base = BusSeqBase, proxy)]
+pub struct BusBfm {}
+
 // ---------------------------------------------------------------------------
 // The testbench
 // ---------------------------------------------------------------------------
@@ -545,5 +550,27 @@ impl Scenario for RandomScenario {
 pub struct RandomTest {}
 
 register_test!(RandomTest);
+
+// ---------------------------------------------------------------------------
+// A test written as a function, calling the VIP's methods as tasks
+// ---------------------------------------------------------------------------
+
+/// Writes a few registers and reads them back one by one, checking each
+/// read where it is made, as a scenario of task calls on the VIP's
+/// `BusBfm`: `BusSequence`'s `write` and `read`, through the sequencer.
+#[testcase(base = RegTest)]
+async fn direct_test(test: &mut RegTest, run_context: &mut RunContext) -> Result<(), TestError> {
+    let mut bus = BusBfm::new(&test.sequencer);
+    for addr in 0..4u8 {
+        bus.write(addr, 0x0f00 | u16::from(addr)).await?;
+    }
+    for addr in 0..4u8 {
+        let data = bus.read(addr).await?;
+        if data != 0x0f00 | u16::from(addr) {
+            run_context.error(format!("read {addr}: got {data:#06x}"));
+        }
+    }
+    Ok(())
+}
 
 verald::export!("verald_regblock");

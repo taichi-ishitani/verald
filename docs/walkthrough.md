@@ -114,8 +114,8 @@ veryl +local test --runtime-arg=VERALD_TESTNAME:ReverseTest --runtime-arg=VERALD
 ```
 
 - `VERALD_TESTNAME` names the test over the one given to `start`: the
-  testbench has `BasicTest`, `ReverseTest` and `RandomTest`; `BasicTest`
-  runs when none is named.
+  testbench has `BasicTest`, `ReverseTest`, `RandomTest` and `DirectTest`;
+  `BasicTest` runs when none is named.
 - `VERALD_<OPTION>` sets an option of the framework: `VERALD_TIMEOUT` (the
   cycles the test must end within; `0` for no limit), `VERALD_LOG_LEVEL` (`error` .. `trace`, `info` by
   default), `VERALD_MAX_ERRORS`. A test module may also give options with
@@ -157,6 +157,7 @@ use verald::prelude::*;
 register_test!(BasicTest);
 register_test!(ReverseTest);
 register_test!(RandomTest);
+// DirectTest is a function marked `#[testcase]`, which registers itself
 
 verald::export!("verald_regblock");   // $comp::verald_regblock
 ```
@@ -437,7 +438,8 @@ A sequence is a struct with `#[sequence(sequencer = ..)]` and an
 `impl Sequence` with its `body`: what it does, sending items to the
 driver through its sequencer. The attribute supplies the rest, the
 sequence core (`SequenceCore`, UVM's `uvm_sequence_base`). The bus VIP
-adds a layer between the two: what every bus sequence can do.
+adds a layer between the two: what every bus sequence can do, its API,
+which it also publishes for tests through a proxy.
 
 ### The protocol's base
 
@@ -476,6 +478,25 @@ the driver wrote. A sequence declared with `base = BusSeqBase` on
 `BusSequencer` gets `write` and `read` with no more code.
 (`#![allow(async_fn_in_trait)]` at the top of the crate allows the
 `async fn`s in a public trait.)
+
+A VIP is controlled through sequences; such an API is what a VIP adds
+where it is useful, made of items (as here) or of its own sequences.
+
+### The proxy
+
+For a test to call `write` and `read` as tasks, the VIP publishes a proxy:
+a sequence with no body, declared with `proxy`:
+
+```rust
+#[sequence(sequencer = BusSequencer, base = BusSeqBase, proxy)]
+pub struct BusBfm {}
+```
+
+It has no `impl Sequence`, so it is never started; its `new` takes the
+sequencer and starts it there (`BusBfm::new(&sequencer)`), and the test
+calls the API on it (in [section 8](#a-test-as-a-function)). It has
+`write` and `read` through the blanket impl, as any sequence with
+`base = BusSeqBase` does.
 
 ### A sequence
 
@@ -679,8 +700,8 @@ registered as it is.
 ## 8. Tests made from the base
 
 A test made from the base gives the step the base leaves out, its `run`,
-in one of two ways: as a method of its own, or as a scenario. Both are
-shown here.
+in one of three ways: as a method of its own, as a scenario, or as a
+function. All three are shown here.
 
 ### A `run` of its own
 
@@ -747,6 +768,49 @@ it can serve several tests, or be given for any step (`pre_run = ..`,
   a test with a spec, a variation applied before and after the build (see
   [design.md](design.md#tests)); a spec written for `RegTest` serves every
   test made from it.
+
+### A test as a function
+
+`DirectTest` is a scenario written straight through, as a testbench
+before UVM wrote one in an `initial` block calling a BFM's tasks: it
+writes a few registers, reads them back, and checks each read where it is
+made. It is a function marked `#[testcase]`:
+
+```rust
+#[testcase(base = RegTest)]
+async fn direct_test(test: &mut RegTest, run_context: &mut RunContext) -> Result<(), TestError> {
+    let mut bus = BusBfm::new(&test.sequencer);
+    for addr in 0..4u8 {
+        bus.write(addr, 0x0f00 | u16::from(addr)).await?;
+    }
+    for addr in 0..4u8 {
+        let data = bus.read(addr).await?;
+        if data != 0x0f00 | u16::from(addr) {
+            run_context.error(format!("read {addr}: got {data:#06x}"));
+        }
+    }
+    Ok(())
+}
+```
+
+- `#[testcase]` makes the test from the base with the function as its
+  `run`, as the scenario above does, and registers it under the
+  function's name in CamelCase, `DirectTest`. `name = ..` gives another
+  name, `spec = ..` a spec. The function takes the base test and the run
+  context, as a scenario's `body` does.
+- `BusBfm::new(&test.sequencer)` makes the VIP's proxy (in
+  [section 5](#the-proxy)), started on the sequencer: `write` and `read`
+  are `BusSequence`'s, called as a BFM's tasks.
+- Its items go through the sequencer and the driver as any sequence's, so
+  the monitor and the scoreboard see them, and the scoreboard checks the
+  reads too. Tasks forked to drive the bus together each make their own
+  proxy, and the sequencer arbitrates between them.
+- What its methods randomize draws from the test's seed source; a
+  sequence with a stream of its own is written as a sequence.
+
+A function suits a scenario of calls to the VIP's tasks, one test each; a
+sequence suits traffic to reuse, and a scenario type a `run` shared by
+tests.
 
 ## 9. Constrained random
 

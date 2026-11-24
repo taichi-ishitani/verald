@@ -255,6 +255,7 @@ impl Test for SeqTest {
                 "Priority" => "priority",
                 "Virtual" => "virtual",
                 "Default" => "default",
+                "Tasks" => "tasks",
                 _ => "unbound",
             },
         })
@@ -266,6 +267,32 @@ register_test!(Priority, SeqTest, ());
 register_test!(Virtual, SeqTest, ());
 register_test!(Default, SeqTest, ());
 register_test!(Unbound, SeqTest, ());
+
+/// A proxy: a sequence with no body, on which a test calls the protocol's
+/// methods.
+#[sequence(sequencer = TxSequencer, base = TxSeqBase, proxy)]
+struct TxBfm {}
+
+/// The protocol's methods called from a test, through proxies: one after
+/// the other, then two at once, arbitrated.
+#[testcase(base = SeqTest)]
+async fn tasks(test: &mut SeqTest, _run_context: &mut RunContext) -> Result<(), TestError> {
+    let a = test.a.borrow().sequencer.handle();
+    let mut x = TxBfm::new(&a);
+    x.base_mut().tag = "x";
+    let mut y = TxBfm::new(&a);
+    y.base_mut().tag = "y";
+    assert_ne!(x.sequence_id(), y.sequence_id());
+    let item = x.read(1).await?;
+    log(format!("x read 1 = {}", item.borrow().read_data));
+    let (p, q) = join(x.read(2), y.read(3)).await;
+    log(format!(
+        "x read 2 = {}, y read 3 = {}",
+        p?.borrow().read_data,
+        q?.borrow().read_data
+    ));
+    Ok(())
+}
 
 verald_tb_runtime::component!(Tb, Methodology);
 
@@ -349,6 +376,23 @@ fn a_default_sequence_runs_in_the_background() {
     let log = take_log();
     assert!(log.contains(&"drive default0".to_string()), "{log:?}");
     assert!(log.contains(&"drive default1".to_string()), "{log:?}");
+}
+
+#[test]
+fn a_test_calls_the_protocol_methods_as_tasks() {
+    let sim = run("Tasks", 4);
+    assert!(sim.finish_requested(), "{:?}", sim.failures());
+    assert!(!sim.failed(), "{:?}", sim.failures());
+    assert_eq!(
+        take_log(),
+        [
+            "drive x1",
+            "x read 1 = 101",
+            "drive x2",
+            "drive y3",
+            "x read 2 = 102, y read 3 = 103",
+        ]
+    );
 }
 
 #[test]

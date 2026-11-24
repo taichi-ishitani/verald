@@ -11,7 +11,7 @@ use verald_tb_runtime::TestError;
 
 use crate::component::TaskFuture;
 use crate::item::ItemHandle;
-use crate::sequence::SequenceCore;
+use crate::sequence::{Sequence, SequenceCore};
 
 /// A sequence waiting for the driver, as an arbiter sees it.
 #[derive(Clone, Debug)]
@@ -418,7 +418,7 @@ impl<S: Sequencer> DefaultSequence<S> {
     /// A default sequence made by `make` when the run phase starts.
     pub fn new<Q>(make: impl Fn() -> Q + 'static) -> Self
     where
-        Q: SequenceCore<Sequencer = S> + 'static,
+        Q: SequenceCore<Sequencer = S> + Sequence + 'static,
     {
         DefaultSequence {
             make: Some(Rc::new(move |handle: SequencerHandle<S>| {
@@ -524,7 +524,7 @@ impl<S: Sequencer> SequencerHandle<S> {
     /// the other tasks when the run phase ends.
     pub fn set_default_sequence<Q>(&self, make: impl FnOnce() -> Q + 'static)
     where
-        Q: SequenceCore<Sequencer = S> + 'static,
+        Q: SequenceCore<Sequencer = S> + Sequence + 'static,
     {
         let handle = self.clone();
         self.core().set_default(Box::new(move || {

@@ -7,7 +7,7 @@
 #   make ARGS="--runtime-arg=ROUNDS:4 --runtime-arg=VERALD_LOG_LEVEL:debug"
 #                         with more runtime arguments
 
-TESTS := BasicTest ReverseTest RandomTest
+TESTS := BasicTest ReverseTest RandomTest DirectTest
 VERYL ?= veryl +local
 
 .PHONY: all clean $(TESTS)

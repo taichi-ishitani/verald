@@ -972,10 +972,12 @@ fn on_impl(args: Args, mut item: ItemImpl) -> syn::Result<TokenStream2> {
     })
 }
 
-/// `#[sequence(sequencer = S, base = B)]`.
+/// `#[sequence(sequencer = S, base = B, proxy)]`.
 struct SequenceArgs {
     sequencer: Type,
     base: Option<Type>,
+    /// A sequence with no body, started when made.
+    proxy: bool,
 }
 
 impl Parse for SequenceArgs {
@@ -983,8 +985,10 @@ impl Parse for SequenceArgs {
         let metas = Punctuated::<Meta, Token![,]>::parse_terminated(input)?;
         let mut sequencer = None;
         let mut base = None;
+        let mut proxy = false;
         for meta in metas {
             match meta {
+                Meta::Path(path) if path.is_ident("proxy") => proxy = true,
                 Meta::NameValue(nv) if nv.path.is_ident("sequencer") => {
                     let expr = nv.value;
                     sequencer = Some(syn::parse2::<Type>(quote!(#expr))?);
@@ -996,7 +1000,7 @@ impl Parse for SequenceArgs {
                 other => {
                     return Err(syn::Error::new(
                         other.span(),
-                        "expected `sequencer = ..` or `base = ..`",
+                        "expected `sequencer = ..`, `base = ..` or `proxy`",
                     ));
                 }
             }
@@ -1004,12 +1008,20 @@ impl Parse for SequenceArgs {
         let sequencer = sequencer.ok_or_else(|| {
             syn::Error::new(Span::call_site(), "`#[sequence]` needs `sequencer = ..`")
         })?;
-        Ok(SequenceArgs { sequencer, base })
+        Ok(SequenceArgs {
+            sequencer,
+            base,
+            proxy,
+        })
     }
 }
 
 pub(crate) fn sequence(attr: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
-    let SequenceArgs { sequencer, base } = syn::parse2(attr)?;
+    let SequenceArgs {
+        sequencer,
+        base,
+        proxy,
+    } = syn::parse2(attr)?;
     let mut item: ItemStruct = syn::parse2(item)?;
     let core = core();
     let name = item.ident.clone();
@@ -1049,10 +1061,25 @@ pub(crate) fn sequence(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
             }
         }
     });
-    Ok(quote! {
-        #item
-
-        impl #name {
+    let new = if proxy {
+        quote! {
+            /// Makes the proxy from its fields, started on `sequencer`: the
+            /// protocol's methods are called on it from then on. The base
+            /// starts at its default. Panics on an unbound handle.
+            #[allow(clippy::too_many_arguments)]
+            #vis fn new(
+                sequencer: &#core::SequencerHandle<#sequencer>,
+                #(#idents: #types),*
+            ) -> Self {
+                #name {
+                    #(#idents,)*
+                    __verald_sequence: #core::__private::SequenceFields::__started(sequencer),
+                    #base_init
+                }
+            }
+        }
+    } else {
+        quote! {
             /// Makes the sequence from its fields; the core's and the base's
             /// start at their defaults.
             #[allow(clippy::too_many_arguments)]
@@ -1063,6 +1090,13 @@ pub(crate) fn sequence(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
                     #base_init
                 }
             }
+        }
+    };
+    Ok(quote! {
+        #item
+
+        impl #name {
+            #new
         }
 
         impl #core::SequenceCore for #name {

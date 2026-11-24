@@ -8,7 +8,8 @@ clocking blocks with `run_with_reset` (step 2), the methodology's skeleton
 (step 3: components, phases, tests, specs and the runner), and TLM,
 sequences, sequencers and agents (step 4), test scenarios, and constrained
 random with seeds per component and sequence (step 5; `examples/regblock`
-puts them together). Notes
+puts them together), and tests written as functions calling a VIP's
+methods as tasks (`#[testcase]`, proxies). Notes
 marked "for now" record where the implementation stops short of the design.
 
 - [Principles](#principles)
@@ -36,7 +37,10 @@ The decisions below come back to these:
   are reached through their types, so that a wrong connection is a compile
   error, not a run-time lookup failure: a sequence's `start` takes its own
   sequencer type, a child is an `Instance<T>`, an analysis port picks its
-  receiver's `Subscriber<T>` by item type.
+  receiver's `Subscriber<T>` by item type. How far to check at compile
+  time is a matter of degree: a check is made there when what it costs
+  (more types, a more involved API, more for users to write) is small,
+  and left to run time, with a clear error, when it is not.
 - **No settings addressed by strings.** No config_db-like store: settings
   travel down in typed configurations, and handles are taken from the
   children a level has just made. Strings remain only where Veryl hands
@@ -606,15 +610,61 @@ register_test!(ReverseTest);
   is not a `Sequence` (no sequencer arbitrates it), and `run` would repeat
   the step's name.
 
+### Tests as functions
+
+Decided: a test whose run is a scenario written straight through, as a
+testbench before UVM wrote one in an `initial` block calling tasks, is a
+function marked `#[testcase]`, made from a base test:
+
+```rust
+#[testcase(base = RegTest)]                // registered as `Basic`
+async fn basic(test: &mut RegTest, run_context: &mut RunContext) -> Result<(), TestError> {
+    let mut bus = BusBfm::new(&test.sequencer);  // the VIP's proxy (see Sequences)
+    bus.write(0, 0x1234).await?;
+    let data = bus.read(0).await?;
+    if data != 0x1234 {
+        run_context.error(format!("read {data:#06x}"));
+    }
+    WriteReadAll::new(2).start(&test.sequencer).await
+}
+```
+
+- It stands for a `Scenario` calling the function, a test made from the
+  base with that scenario as its `run` (`#[component(test(base = B, run =
+  S))]`), and `register_test!`: nothing new runs underneath, and the
+  hierarchy, the configuration, `pre_run` / `post_run`, `check` and
+  `report` are the base's. Every part of the VIP (the monitor, the
+  scoreboard, callbacks, the sequencer's arbitration) works as in any test.
+- The test is registered under the function's name in CamelCase
+  (`basic_write` as `BasicWrite`), the name of the struct generated for it;
+  `name = ..` gives another. `spec = ..` registers it with a spec (one, or a
+  `BundledSpecs`).
+- The function takes the base test and the run context, as a scenario's
+  `body`, and returns what `run` returns.
+- An attribute of its own, not `#[component(..)]`: a function is not a
+  component's struct or impl, whatever it is made into. `testcase`, not
+  `test`, which is Rust's own.
+- Why: a VIP built on Verald is to serve testbenches written in the
+  manner before UVM, a scenario of task calls, as well. Such a scenario
+  written in Rust on the VIP's whole agent keeps everything the VIP does,
+  and needs nothing of Veryl; one written in Veryl (task calls from an
+  `initial` block, through methods of the component) would need tickets
+  polled each cycle, a root per component instance and blocking methods
+  from Veryl, and is not taken up.
+
 ## Sequences
 
-Decided: three layers, as UVM's `uvm_sequence_base`, a protocol's sequence
-base, and the sequences that generate items.
+Decided: a VIP is controlled through sequences, as in UVM. Where it is
+useful, a VIP also gives an API, methods made of items and sequences,
+which its sequences use and which it publishes for tests to call (see
+[A protocol's methods from a test](#a-protocols-methods-from-a-test)).
+Sequences have three layers, as UVM's `uvm_sequence_base`, a protocol's
+sequence base (where the API is), and the sequences that generate items.
 
 | Layer | Fields | Methods | Written by |
 |---|---|---|---|
-| 1. sequence core | the framework's, inserted by `#[sequence]`: the sequencer, the parent sequence, ids, priority, the random generator | `SequenceCore`: `start`, `start_item`, `finish_item`, `sequencer` | the framework (`#[sequence]` implements it) |
-| 2. protocol base | a plain struct of the VIP's (`Default`), inserted by `#[sequence(base = ..)]`, reached through `HasBase<T>` | a trait of the VIP's over `SequenceCore + HasBase<T>`, with a blanket impl | the VIP's author, with no macro |
+| 1. sequence core | the framework's, inserted by `#[sequence]`: the sequencer, the parent sequence, ids, priority, the random generator | `SequenceCore`: `start` (a sequence with a body only), `start_item`, `finish_item`, `sequencer` | the framework (`#[sequence]` implements it) |
+| 2. protocol base (optional) | a plain struct of the VIP's (`Default`), inserted by `#[sequence(base = ..)]`, reached through `HasBase<T>` | the VIP's API: a trait of the VIP's over `SequenceCore + HasBase<T>`, with a blanket impl | the VIP's author, with no macro |
 | 3. sequence | its author's | `Sequence`: `body` | the sequence's author |
 
 ```rust
@@ -655,8 +705,21 @@ impl Sequence for RandomWrites {
   framework's and `#[sequence]` implements it, so the author's `impl
   Sequence` and the macro's impl do not meet. The names follow UVM's
   `uvm_sequence` and `uvm_sequence_base`.
+- The core is what a sequence is to its sequencer (an id, a priority) and
+  sending items; it does not require a body. `start` runs the body, so it
+  is bounded by `where Self: Sequence`: a sequence with no body (a proxy,
+  see [A protocol's methods from a test](#a-protocols-methods-from-a-test))
+  has the core and the protocol's methods written over it, and starting
+  it does not compile. (A trait of its own for `start` was tried first;
+  the bound on the method does the same with one trait fewer. A check at
+  run time, a body the macro gives a proxy that fails, would need no
+  change to the core at all; the check is made at compile time since it
+  costs only a bound on three methods, as [Principles](#principles) weigh
+  it.)
 - The protocol layer is a plain struct and a trait: VIP authors write no
-  macro. More layers nest: a base struct holds the one below it, and the
+  macro. A method of it may send items (`start_item` / `finish_item`) or
+  start the VIP's sequences (`start_from(self.sequencer_handle(), self)`,
+  passing on the priority). More layers nest: a base struct holds the one below it, and the
   trait above reaches it through it.
 - `start` belongs to the framework, so it sets the sequencer (UVM's
   `m_sequencer`) before `body`; every layer sees the same sequencer.
@@ -883,6 +946,52 @@ test.env.apb.set_default_sequence(|| RandomWrites::new(10));
 - A default sequence that returns `Err` is a fatal error, as any `run`.
 - Sequences started explicitly (from the test's `run`, for example) run
   alongside it and share the sequencer's arbitration.
+
+### A protocol's methods from a test
+
+Decided: the VIP's API (the methods of its protocol layer,
+`ApbSequence::write`) is called from a test as tasks through a proxy, a
+sequence with no body that the VIP declares and publishes with
+`#[sequence(.., proxy)]`:
+
+```rust
+// the VIP: the proxy it publishes
+#[sequence(sequencer = ApbSequencer, base = ApbSeqBase, proxy)]
+pub struct ApbBfm {}
+
+// a test's run
+let mut apb = ApbBfm::new(&self.sequencer); // started on the sequencer
+apb.write(0x10, 0x1234).await?;             // ApbSequence's, through its blanket impl
+```
+
+- A proxy is a sequence: to the sequencer, which arbitrates sequences and
+  matches responses to them, it is one like any other (as UVM's
+  `execute_item` makes a sequence of its own for an item). Its items go
+  through the sequencer, so arbitration, the driver's callbacks and the
+  monitors work as for any sequence. It has no body (no `impl Sequence`),
+  since its steps are called from outside, so it is not started: `new`
+  takes the sequencer first and starts it there, giving it its sequence
+  id. `new` on an unbound handle panics, as `borrow()` does.
+- `#[sequence]` implements `SequenceCore` and `HasBase` on it as on any
+  sequence, so the protocol trait's blanket impl covers it; the VIP writes
+  the struct and the attribute only. It is the VIP's own type, so it may
+  have fields (after the sequencer in `new`) and methods of its own, and
+  methods only a test needs go there or in a trait of the VIP's for it.
+- `set_priority` takes effect at once (on any sequence it sets the
+  priority it runs with, which `start` reckons again).
+- It has no seed source of its own: what its methods randomize draws from
+  the task calling them (the test's), which keeps runs reproducible; a
+  sequence that needs its own stream is written as a sequence.
+- One proxy is used by one task at a time (its methods take `&mut self`);
+  tasks forked to drive one bus together each make their own, and the
+  sequencer arbitrates between them.
+- The driver's transfer itself is best kept in plain `async` methods over
+  its clocking block (the driver's loop calling them), so the protocol's
+  behaviour is in one place; nothing here depends on it.
+- Considered: a generic proxy type the framework gives (`BfmProxy<S, B>`),
+  its base named on the sequencer or as a type argument. A type of the
+  VIP's own names the BFM for its users, takes methods of its own, and
+  needs nothing on the sequencer.
 
 ## TLM and the sequencer
 
@@ -1601,7 +1710,7 @@ hierarchy.
 | `verald-random-macros` (`crates/random/macros`) | its proc macros (`#[randomize]`, `#[constraints]`, ..) |
 | `verald-tb-runtime` (`crates/tb/runtime`) | the executor, tasks and their concurrency (`fork_scope`, `join`, `first`), waits for clocks and resets (`run_with_reset`), the shared parts (`Fifo`, events, `Semaphore`), clocking blocks, the registrations and Veryl's adapter as a subscriber of the host layer (`testbench`), the timeout, unexpected finishes |
 | `verald-tb-core` (`crates/tb/core`) | the UVM-like part: `Component`, `Test`, `Instance`, `Scope`, the phases, `Knob`, `Callbacks`, TLM, items (`ItemHandle`), sequences and sequencers, agents' and monitors' helpers, `ItemWaiter`, `Spec` / `BundledSpecs`, the runner (`register_test!`, test selection, reporting, the error limit) |
-| `verald-tb-macros` (`crates/tb/macros`) | the testbench's proc macros (`#[clocking]`, the wait macros; `#[component(..)]`, `#[sequence]`, `register_test!`; `bundled_specs!` is a `macro_rules!` of the core) |
+| `verald-tb-macros` (`crates/tb/macros`) | the testbench's proc macros (`#[clocking]`, the wait macros; `#[component(..)]`, `#[sequence]`, `#[testcase]`, `register_test!`; `bundled_specs!` is a `macro_rules!` of the core) |
 | `verald-tb-dpi` (`crates/tb/dpi`) | a DPI host (a prototype) running a testbench on a SystemVerilog simulator; its functions call the testbench component's methods (`set_clock`, `start`, ..), so it belongs to the testbench |
 
 Decided: the directories group the crates by part. What the parts share is
