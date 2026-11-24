@@ -66,7 +66,7 @@ end of simulation
 
 The macros go through a property IR rather than generating the state
 machines directly, so that the notation can be replaced (see
-[the macro alternative](#notation-a-rust-statements-and-b-a-function-like-macro))
+[the notations compared](#notation-rust-functions-with-sequences-in-seq))
 and SVA can be emitted later from the same IR.
 
 ## Writing assertions
@@ -108,8 +108,7 @@ impl BridgeSva {
     #[assert]
     fn req_ack(&self) {
         if req {
-            delay(1..=4);
-            ack;
+            seq!(delay(1..=4) -> ack);
         }
     }
 
@@ -118,8 +117,7 @@ impl BridgeSva {
     fn echo_data(&self) {
         if self.req_fire() {
             let d = i_data;
-            wait(o_valid && o_ready);
-            o_data == d;
+            seq!(wait(o_valid && o_ready) -> o_data == d);
         }
     }
 
@@ -145,9 +143,7 @@ impl BridgeSva {
     // full ##[1:$] empty
     #[cover]
     fn fill_drain(&self) {
-        full;
-        delay(1..);
-        empty;
+        seq!(full -> delay(1..) -> empty);
     }
 }
 ```
@@ -165,16 +161,41 @@ impl BridgeSva {
 
 ## Temporal syntax
 
-Property bodies are written in Rust syntax, so that rustfmt and
-rust-analyzer work on them, and with keywords rather than SVA's symbols
-(`|->`, `##`, `[*]`, `[->]`), which are hard to read.
+Properties are written in Rust functions, so that rustfmt and rust-analyzer
+work on everything around them, and with keywords rather than SVA's symbols
+(`|->`, `##`, `[*]`, `[->]`), which are hard to read. A sequence is written
+in `seq!(..)`, its elements chained by `->`, so that it reads as one
+continuing expression.
 
 ### The time model
 
-A property body reads as procedural code: statements are evaluated in
-order, and **time advances only at `delay` and `wait`**. Statements with no
-delay between them are evaluated in the same cycle (`##0`). This is how
-time passes in testbench code (`tick!`).
+- **`->` is `&&` extended over time**: the next element starts at the
+  cycle where the previous one ended (SVA's `##0`, fusion). It advances no
+  time itself. Between two booleans it is exactly `&&`; over elements
+  that take time it reads the same way:
+
+  | here | read as | SVA |
+  |---|---|---|
+  | `a -> b` | a and b | `a ##0 b`, that is `a && b` |
+  | `a -> delay(1..=3) -> b` | a, and 1 to 3 cycles pass, and b | `a ##[1:3] b` |
+  | `wait(x) -> y` | wait for x, and y (at that cycle) | `x[->1] ##0 y` |
+  | `repeat(1.., busy) -> done` | busy on, and done (at its last cycle) | `busy[*1:$] ##0 done` |
+
+  So `a -> b` is allowed and means `a && b`; between plain booleans,
+  `a && b` is the usual way to write it.
+- **`->` is not SystemVerilog's implication.** In SV, `a -> b` is "a
+  implies b"; within `seq!` it is "a and b". Implication is written with
+  `if` (see below), which keeps the two apart.
+- **Time is taken by the elements `delay`, `wait` and `repeat`** only.
+- **Time advances only within `seq!`.** A property body is same-cycle
+  conditions and `let`s, ending with at most one `seq!`; nothing follows it.
+
+`seq!` is not expanded on its own: `#[assert]`, `#[cover]` and the other
+attributes read it as part of the function they rewrite. A placeholder
+definition only reports its use elsewhere. Its contents are a token stream
+to Rust, so `->` compiles there (it does not in a function body, which rustc
+parses before the attribute sees it), and rustfmt leaves them as written
+while formatting the rest.
 
 ### Implication
 
@@ -185,8 +206,8 @@ the body.
 | SVA | here |
 |---|---|
 | `a \|-> p` | `if a { p }` |
-| `a \|=> p` | `if a { delay(1); p }` |
-| `s \|-> p`, `s` a sequence | `if { s } { p }`, e.g. `if { a; delay(1..=3); b; } { c; }` |
+| `a \|=> s` | `if a { seq!(delay(1) -> s) }` |
+| `s \|-> p`, `s` a sequence | `if seq!(s) { p }`, e.g. `if seq!(a -> delay(1..=3) -> b) { c; }` |
 
 The two sides differ in how multiple matches count. Every match of the
 condition is checked (universal); the expectation holds if one of its
@@ -194,102 +215,232 @@ matches does (existential). `a ##[1:3] b |-> c` requires `c` at every cycle
 where `b` matches, so it is written with the whole sequence in the header:
 
 ```rust
-if { a; delay(1..=3); b; } {
+if seq!(a -> delay(1..=3) -> b) {
     c;
 }
 ```
 
-Written with a nested `if` instead, `if a { delay(1..=3); if b { c; } }`,
-the inner condition would fall on the expectation's side, where one match
-suffices: the property would hold whenever `b` is false at any cycle of the
-window, which is almost always. **An `if` in a body after time has advanced
-(`delay`, `wait`, `repeat`) is therefore an error**, pointing to the header
-form. An `if`/`else` before any delay is a same-cycle condition and is
-allowed.
+A nested condition after a delay in the body, as
+`if a { delay(1..=3); if b { c; } }` would be, would fall on the
+expectation's side, where one match suffices: the property would hold
+whenever `b` is false at any cycle of the window, which is almost always.
+Since time advances only within `seq!` and nothing follows it, such a
+condition cannot be written.
 
-### Operators
+### Elements and operators
 
 | SVA | here | notes |
 |---|---|---|
-| `##n`, `##[m:n]`, `##[m:$]` | `delay(n);`, `delay(m..=n);`, `delay(m..);` | Veryl's range notation |
-| `b[->1]` | `wait(b);` | matches at the current cycle if `b` holds |
-| `s[*n]`, `s[*m:$]` | `repeat(n, { s });`, `repeat(m.., { s });` | one cycle between repetitions, as in SVA |
-| `a throughout s` | `throughout(a, { s });` | |
-| `a until b` | `until(a, b);` | weak |
-| `s_eventually p` | `eventually({ p });` | strong |
-| `not s` | `never({ s });` | |
+| `a ##0 b` (booleans) | `a && b` | the same cycle |
+| `##n`, `##[m:n]`, `##[m:$]` | `delay(n)`, `delay(m..=n)`, `delay(m..)` | Veryl's range notation |
+| `s[*n]`, `s[*m:$]` | `repeat(n, s)`, `repeat(m.., s)` | consecutive: one cycle between repetitions, as in SVA |
+| `b[->n]`, `b[->m:n]` | `happen(n, b)`, `happen(m..=n, b)` | intermittent: ends where `b` holds the n-th time, gaps allowed; counts cycles where `b` holds, not rises |
+| `s.triggered` | `ended(s)` | a boolean: true at a cycle where a match of `s` ends, whenever it started |
+| `s.triggered[->n]` | `happen(n, ended(s))` | a sequence happening n times, counted at its end points |
+| `b[->1]` | `wait(b)` | the same as `happen(1, b)`, kept for the most common case; matches at the current cycle if `b` holds |
+| `a throughout s` | `throughout(a, s)` | |
+| `a until b` | `until(a, b)` | weak |
+| `s_eventually p` | `eventually(p)` | strong |
+| `not s` | `never(s)` | |
+| `(.., d = x)` | `let d = x` | an element of `seq!`; in a body, a plain `let` |
 | `$past`, `$rose`, `$fell`, `$stable`, `$changed` | `past(x)`, `past(x, n)`, `rose(x)`, `fell(x)`, `stable(x)`, `changed(x)` | |
 | `$onehot`, `$onehot0`, `$countones` | `onehot(x)`, `onehot0(x)`, `countones(x)` | |
 
-Sequence arguments are block expressions (`{ ... }`), not closures; see
-[blocks rather than closures](#blocks-rather-than-closures). Whether a bare
-boolean is accepted where a block is expected (`repeat(1.., busy)`) is to be
-decided; it would keep rustfmt from spreading a one-signal block over three
-lines.
+A sequence argument (`s` above) is one element as it is (`repeat(1.., busy)`,
+`throughout(busy, wait(done))`, `eventually(ack)`), or a chain in `seq!`
+(`never(seq!(grant -> delay(1) -> grant && !release))`).
 
 ### Examples
 
+Each with the SVA it stands for and how it reads:
+
 ```rust
-// o_valid && !i_ready |=> o_valid && $stable(o_data)
-#[assert]
-fn hold_while_stalled(&self) {
-    if o_valid && !i_ready {
-        delay(1);
-        o_valid && stable(o_data);
+#[assertions]
+impl BridgeSva {
+    // SVA:  o_valid && !i_ready |=> o_valid && $stable(o_data)
+    // Read: if o_valid && !i_ready: 1 cycle passes, and o_valid && stable(o_data)
+    #[assert]
+    fn hold_while_stalled(&self) {
+        if o_valid && !i_ready {
+            seq!(delay(1) -> o_valid && stable(o_data));
+        }
     }
-}
 
-// start |=> busy[*1:$] ##1 done
-#[assert]
-fn burst(&self) {
-    if start {
-        delay(1);
-        repeat(1.., {
-            busy;
-        });
-        delay(1);
-        done;
+    // SVA:  req |-> ##[1:4] ack
+    // Read: if req: 1 to 4 cycles pass, and ack
+    #[assert]
+    fn req_ack(&self) {
+        if req {
+            seq!(delay(1..=4) -> ack);
+        }
     }
-}
 
-// start |=> busy throughout done[->1]
-#[assert]
-fn busy_until_done(&self) {
-    if start {
-        delay(1);
-        throughout(busy, {
-            wait(done);
-        });
+    // SVA:  a ##[1:3] b |-> c
+    // Read: if a, and 1 to 3 cycles pass, and b: c (at every match)
+    #[assert]
+    fn b_then_c(&self) {
+        if seq!(a -> delay(1..=3) -> b) {
+            c;
+        }
     }
-}
 
-// not (grant ##1 (grant && !release))
-#[assert]
-fn no_double_grant(&self) {
-    never({
-        grant;
-        delay(1);
-        grant && !release;
-    });
-}
+    // SVA:  (i_valid && i_ready, d = i_data) |-> (o_valid && o_ready)[->1] ##0 o_data == d
+    // Read: if i_valid && i_ready, keep i_data as d: wait for o_valid && o_ready, and o_data == d
+    #[assert]
+    fn echo_data(&self) {
+        if i_valid && i_ready {
+            let d = i_data;
+            seq!(wait(o_valid && o_ready) -> o_data == d);
+        }
+    }
 
-// req |-> s_eventually ack
-#[assert]
-fn req_eventually_ack(&self) {
-    if req {
-        eventually({
-            ack;
-        });
+    // SVA:  (a, d = data) ##1 b |-> out == d
+    // Read: if a, and keep data as d, and 1 cycle passes, and b: out == d
+    #[assert]
+    fn keep_mid_sequence(&self) {
+        if seq!(a -> let d = data -> delay(1) -> b) {
+            out == d;
+        }
+    }
+
+    // SVA:  full |-> !i_push
+    // Read: if full, !i_push (same cycle)
+    #[assert]
+    fn no_overflow(&self) {
+        if full {
+            !i_push;
+        }
+    }
+
+    // SVA:  i_push && !i_pop && !full |=> count == $past(count) + 1
+    // Read: if i_push && !i_pop && !full: 1 cycle passes, and count == past(count) + 1
+    #[assert]
+    fn count_inc(&self) {
+        if i_push && !i_pop && !full {
+            seq!(delay(1) -> count == past(count) + 1);
+        }
+    }
+
+    // SVA:  $onehot0(grant)
+    // Read: onehot0(grant) at every cycle
+    #[assert]
+    fn grant_onehot(&self) {
+        onehot0(grant);
+    }
+
+    // SVA:  start |=> busy[*1:$] ##1 done
+    // Read: if start: 1 cycle passes, and busy for 1 or more cycles, and 1 cycle passes, and done
+    #[assert]
+    fn burst(&self) {
+        if start {
+            seq!(delay(1) -> repeat(1.., busy) -> delay(1) -> done);
+        }
+    }
+
+    // SVA:  start |=> busy throughout done[->1]
+    // Read: if start: 1 cycle passes, and busy throughout waiting for done
+    #[assert]
+    fn busy_until_done(&self) {
+        if start {
+            seq!(delay(1) -> throughout(busy, wait(done)));
+        }
+    }
+
+    // SVA:  not (grant ##1 (grant && !release))
+    // Read: never grant, and 1 cycle passes, and grant && !release
+    #[assert]
+    fn no_double_grant(&self) {
+        never(seq!(grant -> delay(1) -> grant && !release));
+    }
+
+    // SVA:  req |-> s_eventually ack
+    // Read: if req, eventually ack
+    #[assert]
+    fn req_eventually_ack(&self) {
+        if req {
+            eventually(ack);
+        }
+    }
+
+    // SVA:  full ##[1:$] empty
+    // Read: full, and 1 or more cycles pass, and empty
+    #[cover]
+    fn fill_drain(&self) {
+        seq!(full -> delay(1..) -> empty);
     }
 }
 ```
+
+All but `keep_mid_sequence` were checked to be valid Rust and left
+unchanged by rustfmt; `let` within `seq!` is the macro's own syntax.
+
+### Named sequences and properties
+
+In the first version, as SVA's `sequence` and `property` declarations: a
+sequence or a property is named, with formal arguments, and used by the
+asserts and covers of the same impl, so that one property serves an assert
+and a cover (and later an assume):
+
+```rust
+#[assertions]
+impl BridgeSva {
+    // SVA's `sequence handshake(valid, ready)`
+    #[sequence]
+    fn handshake(valid: bool, ready: bool) {
+        seq!(valid -> wait(ready));
+    }
+
+    // SVA's `property stable_until_ready(valid, ready, data)`
+    #[property]
+    fn stable_until_ready(valid: bool, ready: bool, data: u32) {
+        if valid && !ready {
+            seq!(delay(1) -> valid && stable(data));
+        }
+    }
+
+    #[assert]
+    fn req_hold(&self) {
+        stable_until_ready(i_valid, i_ready, i_data);
+    }
+
+    #[assert]
+    fn rsp_hold(&self) {
+        stable_until_ready(o_valid, o_ready, o_data);
+    }
+
+    #[cover]
+    fn req_done(&self) {
+        seq!(handshake(i_valid, i_ready) -> delay(1..) -> o_valid);
+    }
+}
+```
+
+`#[assertions]` receives the whole impl, so it sees the named ones and
+expands each use in place before lowering to the property IR; the engine
+is not involved. The expansion:
+
+- **substitutes arguments by name**, as SVA's formal arguments: an argument
+  is an expression evaluated at each cycle it is referred to, not a value
+  taken at the call (`data` in `stable_until_ready` is the data of the
+  cycle after the condition);
+- **renames local `let`s** so that they do not collide where expanded;
+- **rejects recursion**;
+- **checks the arguments' types** against the signature, by bindings
+  generated only for the check; the signature is plain Rust, so
+  rust-analyzer sees it.
+
+Only the same impl's are visible: a proc macro sees its own tokens alone.
+Reuse beyond it is by assertion blocks as types (see
+[Deferred items](#deferred-items)).
 
 ### Not in the first version
 
 Property `and` / `or` (two asserts do for `and`; `or` is rare), SVA's
 `if`/`else` property, `intersect`, `within`, `first_match`, non-consecutive
-repetition (`[=n]`), `[->n]` for `n > 1`, and parameterized properties. The
-subset is to be confirmed.
+repetition (`[=n]`). The subset is to be
+confirmed. Sequences written as `;`-separated statements, beside `seq!`,
+are left out until long sequences show the need: adding a second form
+later breaks nothing, while removing one would.
 
 ## Semantics
 
@@ -301,20 +452,42 @@ The semantics are SVA's (IEEE 1800, chapter 16) except where noted.
   clock; attempts run concurrently, each with its own copies of `let`
   variables.
 - **Clock and reset**: given per assertion block (`clock = ..`,
-  `reset = ..`). The edge and the reset's polarity come from the Veryl types
-  (`clock_posedge`, `reset_async_low`, ..), so they are never written. A
-  block without a reset is never disabled. Properties of another clock
+  `reset = ..`). Properties are evaluated at `on_clock` and attempts
+  dropped at `on_reset`, as the simulator calls them; no edge or polarity
+  is written or looked at. A block without a reset is never disabled. Properties of another clock
   domain go in another block; a property cannot override its block's clock.
 - **Reset** (`disable iff`): while the reset is asserted, attempts are
   dropped and no attempts start. Whether a synchronous reset reaches the
   component at its assertion as an asynchronous one does (`on_reset`) is to
   be checked.
 - **Strength**: sequences in an expectation are weak, as in SVA:
-  `if req { wait(ack); }` does not fail if `ack` never comes. `eventually`
-  is strong. At the end of the simulation, attempts still running are
+  in `if req { seq!(wait(ack)); }`, an attempt whose `ack` has not come is
+  left incomplete. At the end of the simulation, attempts still running are
   reported as incomplete, not as failures, as commercial simulators do.
-- **`wait`** matches at the current cycle if its condition holds there, as
-  `b[->1]` does; "from the next cycle" is `delay(1); wait(b);`.
+  `eventually` is strong: an attempt still running at the end fails.
+- **`wait`** is level-sensitive, as `b[->1]` is (`!b[*0:$] ##1 b`): it
+  matches at the current cycle if its condition holds there, and does not
+  wait for the condition to fall first; "from the next cycle" is
+  `seq!(delay(1) -> wait(b))`.
+- **`happen`** is too (`b[->n]`, defined as `(!b[*0:$] ##1 b)[*n]`): it
+  counts the cycles where `b` holds, so a `b` held for three cycles makes
+  `happen(3, b)` match at the third, after one pulse. Counting pulses is
+  `happen(n, rose(b))`; whether a `b` already high at the start counts then
+  depends on the sample before it.
+- **`happen` takes a boolean**, as SVA's `[->n]` does (`!s` is not
+  defined for a sequence spanning cycles and matching several times). A
+  sequence happening n times is `happen(n, ended(s))`, as SVA's
+  `s.triggered[->n]`: counted at the cycles where a match of `s` ends,
+  once per cycle however many end there, **whenever the match started**,
+  so after `req` a handshake that started before `req` and ends after it
+  counts too.
+- **`ended(s)`** is true at a cycle where a match of `s` ends, whenever
+  that match started, as SVA's `s.triggered` (`.ended` in its earlier
+  versions).
+- **`repeat` is consecutive, `happen` intermittent.** `repeat(3, rose(a))`
+  asks for three rises in three consecutive cycles, which a one-bit signal
+  cannot do (a rise needs the cycle before at 0), so it never matches;
+  three rises with gaps are `happen(3, rose(a))`.
 - **`rose` / `fell`** look at the least significant bit, as `$rose` and
   `$fell` do.
 - **X and Z read as 0** (deviation from SV). Fields are converted as
@@ -378,13 +551,22 @@ module fifo_test {
 - The component is instantiated explicitly in the test module. A
   testbench that already registers its signals needs no extra wiring for
   its assertions.
+- Without a testbench, the component exports the assertions alone and is
+  used the same way: the test module registers the signals and starts it
+  (a DUT driven by `$tb::clock_gen` and the test module's own `initial`).
+  See [One component](#one-component-with-or-without-the-testbench).
 - Signals reached this way are the test module's, which connect to the
   DUT's ports: enough for assertions on a DUT's inputs and outputs.
 - It relies on references passed to component methods
   ([veryl-lang/veryl#3701](https://github.com/veryl-lang/veryl/pull/3701)),
   so it runs on the `tbf` branch with `veryl +local`.
-- How an assertion block is registered and when it is bound (with
-  `tb.start`, or by a method of its own) is to be decided.
+- Blocks are bound when the component starts, once the registrations are
+  complete. How a block is registered (in `export!`, or by a method) is to
+  be decided. Whatever it is,
+  it takes where the block binds (a name, or paths as clocking blocks'
+  `<Name>Paths`) from the first version, not only the block's type, so
+  that the same block can later be registered several times without
+  changing what users write.
 
 ### Later: module instances
 
@@ -428,15 +610,34 @@ What the assertions take from it:
 
 - `Signals` and `MemberSource`: an assertion block's binding is generated
   over `S: Signals`, so it binds to the test module's registrations (the
-  proof of concept, through the runtime's `Start` and `Scope`) and later
-  to an instance's probes, unchanged;
+  proof of concept) and later to an instance's probes, unchanged;
 - `InputSignal<T>`, `SignalValue` and the direct reads: assertions read
   every field at every edge, through the staged buffers' pointers, without
   a host call;
 - `ModportRead` and `InputOnly`, generated by `#[modport]`;
 - the services (`fail`, `log`, `time`, `fired`, the reset state);
-- in the full implementation, `HookSubscriber`: the assertions are a
+- `HookSubscriber`, from the proof of concept on: the assertions are a
   subscriber of the hooks, evaluating synchronously, without the runtime.
+
+What the layer is to gain before the proof of concept:
+
+- **`export!` over a list of subscribers**
+  ([host-layer-design.md](host-layer-design.md#exporting-a-component)):
+  one component holding the testbench, the assertions, or both, the hooks
+  dispatched to them in order (assertions first).
+- **The registrations in the layer**: the table of names to ports
+  (`set_clock`, `set_reset`, `set_interface`, `set_input`, `set_output`)
+  and its `Signals`, moved from the runtime, so that a component without
+  the testbench has them too. What a name means beyond a port (`Clock` and
+  `Reset`, which tasks wait on) stays in the runtime, over the layer's
+  table.
+- **The start, as an event of the layer**: the test module's `start`
+  ends the registrations; the subscribers are told (to bind, and the
+  runtime to run its test). Without the testbench, `start` takes no test
+  name.
+- **A failure known to the layer**: a subscriber's failure is recorded, so
+  that the runtime, at the end, does not report the finish it caused as
+  an unexpected one.
 
 ### Reusing users' modport structs
 
@@ -463,8 +664,7 @@ impl BusSva {
     #[assert]
     fn hold_while_stalled(&self) {
         if bus.valid && !bus.ready {
-            delay(1);
-            bus.valid && stable(bus.data);
+            seq!(delay(1) -> bus.valid && stable(bus.data));
         }
     }
 }
@@ -509,15 +709,14 @@ hook call per event, rather than one call per bound instance, so the cost
 across the C ABI is per edge, not per instance. The properties are state
 machines stepped synchronously at each edge.
 
-For the proof of concept, each assertion block runs as a task of the
-runtime, under `run_with_reset`: wait for the clock's edge, read the
-sampled values, step the properties, run `#[on_clock]`. The reset handling
-(attempts dropped, auxiliary state re-initialized) comes from
-`run_with_reset`, and a failure returned as the task's `Err` ends the test,
-so the runtime needs no change. On module instances the assertions are a
-subscriber of the host layer's hooks instead, evaluating every bound
-instance synchronously (see
-[host-layer-design.md](host-layer-design.md#hooks)).
+From the proof of concept on, the assertions are a subscriber of the host
+layer's hooks (see [host-layer-design.md](host-layer-design.md#hooks)), not
+tasks of the runtime: at `on_clock`, each block whose clock fired reads the
+sampled values, steps its properties and runs `#[on_clock]`; at `on_reset`,
+a block whose reset fired drops its attempts and re-initializes its
+auxiliary state; at `on_finish`, incomplete attempts and cover counts are
+reported. Bound instances on module instances, later, are evaluated the
+same way.
 
 Possible optimizations:
 
@@ -562,8 +761,10 @@ Veryl's `bind` is not involved: the component reads the signals itself.
 
 Scope:
 
+- one component, with the testbench or without it, through `export!`
+  over subscribers;
 - assertion blocks on the test module's signals, bound through the
-  registrations;
+  registrations, which the host layer keeps;
 - the temporal syntax above, compiled through the property IR into state
   machines;
 - auxiliary state with `#[on_clock]` and `check!`;
@@ -680,6 +881,19 @@ for quick checks.
 
 - Formal verification (see [above](#formal-verification-a-later-study)).
 - The subset of temporal operators.
+- **Reusing assertion blocks** (next after the first version), as SVA's
+  checkers bound in several places: an assertion block is a Rust type, so
+  the same block is instantiated for several interfaces, from a shared
+  crate too (a VIP's). Needed: generating `<Name>Paths` for it, as
+  clocking blocks have; registering a block several times; and, for
+  interfaces of other widths, generic blocks and modport structs, which
+  `#[modport]` rejects today (`check_plain` in the macros' codegen), or
+  fields of `BigUint` at a cost in speed.
+- Named sequences and properties across impls and crates (a library of
+  protocol sequences): a proc macro sees its own tokens only, so either
+  definitions expanded into `macro_rules!` that pass their tokens on
+  (compile time kept, complex), or properties built as IR at run time
+  (simple, slower). Not before block reuse shows the need.
 - A limit on failures (`max_errors`).
 - Assertions on module instances, with the host API and metadata above.
 - Structs generated from metadata.
@@ -710,6 +924,20 @@ Veryl's grammar (expressions, scoping) would have to be maintained, and
 editors and formatters would need support for it. A Rust DSL gets parsing
 from `syn` and tooling from Rust, as constrained random does.
 
+### One component, with or without the testbench
+
+The assertions are a subscriber in the same component as the testbench,
+not a component of their own, nor tasks of the runtime. One component
+means one registration of each signal, one staging of the inputs, and a
+failure the testbench knows of (not reported again as an unexpected
+finish). A component of their own was found feasible (the host layer has
+the hooks' entry and the services) but would register every signal twice
+and stage it twice; tasks of the runtime would need the testbench, and
+would be thrown away when the assertions bind to module instances.
+
+The registrations move to the host layer so that the assertions do not
+need the testbench: a DUT test without one exports the assertions alone.
+
 ### Not Veryl's `bind`
 
 Rejected: emitting checkers and `bind` (which Veryl's simulator does not
@@ -731,7 +959,75 @@ hides the dependency on the implementation. Listing internal signals
 SVA's `|->`, `|=>`, `##[m:n]`, `[*m:$]` and `[->n]` are hard to read.
 Rust's expressions have no `->`-like operator: `>>` binds tighter than `&&`
 and `==` (`a && b >> c` is `a && (b >> c)`) and a block cannot start a
-statement before it, so it was rejected.
+statement before it, so it was rejected as an implication.
+
+`->` is used only within `seq!`, between elements, for a sequence to read
+as one continuing expression. It means `&&` extended over time (SVA's
+`##0`), which explains every case with one rule: `a -> b` is `a && b`, and
+`wait(x) -> y` checks `y` at the cycle `x` matches.
+
+Considered first: reading `->` as "then" and rejecting two booleans chained
+directly, since "a then b" suggests b after a while nothing takes time
+between them, and since SystemVerilog's `->` is an implication. But read in
+the flow of a condition ("if .., then ..") rather than of time, `->`
+suggests no time passing; what remains is the implication reading, which
+an error on `a -> b` alone would not remove from `wait(x) -> y` and the
+like. Reading `->` as `&&` needs no special case: `a -> b` means what it
+reads, and the documentation states that `->` is not SV's implication,
+which is written with `if`. SVA's sequence `and` (two sequences starting
+at one cycle, both matching) is a different operator; it is not in the
+first version, and its name is to be kept apart from `->` if it comes.
+
+### `repeat` and `happen`: one word for each kind of repetition
+
+SVA has separate operators for consecutive (`[*n]`) and goto (`[->n]`)
+repetition. Written as `repeat(n, s)` and `repeat(n, wait(b))`, the two
+differed only by a `wait` easily overlooked, and `repeat(3, rose(a))` (never
+matching) was easily written for `repeat(3, wait(rose(a)))`. So each kind
+has its own word, a verb as `repeat` is:
+
+- `repeat(n, s)`, consecutive, for sequences and booleans, as SVA's
+  `[*n]` (SVA's own term for which is "consecutive repetition");
+- `happen(n, b)`, intermittent, for booleans only, as SVA's `[->n]`; a
+  sequence through `ended(s)` (SVA's `s.triggered`).
+
+Considered for the intermittent one: `wait(b, n)` (a count on `wait`,
+dropped); `recur` (pairs with `repeat`), `occur`, `collect`, `gather`,
+`count` (says nothing of where it ends), `catch`, `reach`, `goto` (SVA's
+term, opaque to others), `appear` and `arise`. `appear` and `arise` were
+rejected for suggesting an edge: a signal held high for three cycles
+"appears" once, and `arise` recalls `rose`, while the count is of cycles
+where the condition holds. `happen` is neutral about duration.
+
+Also considered: a word for a continuing state in place of `repeat`
+(`stay`; `hold`, which may read as `stable`; `keep`; `last`; `continue`, a
+Rust keyword). It reads best for booleans, but not for repeating a
+sequence, so `repeat` is kept.
+
+### `ended(s)`, and `happen` on booleans only
+
+Considered first: `happen(n, s)` taking a sequence, counting the end points
+of its matches that start at or after `happen` starts. It fits "after
+`req`, three handshakes" more closely, but departs from SVA and tracks the
+matches in flight for every attempt. Chosen instead: `happen` on booleans,
+as `[->n]` is, and `ended(s)` for a sequence's end points, matching SVA's
+`s.triggered[->n]` one to one and evaluated once per cycle for all
+attempts. The name follows `rose`, `fell` and `changed`, predicates on the
+current cycle in the past tense, and SVA's former `.ended`; rejected:
+`triggered` (reads as causing something), a method `s.triggered()` (the
+sampled-value functions are functions), `matched` (SVA's `.matched` is a
+different, multi-clock feature), `done` and `finished` (`done` is a common
+signal name).
+
+### `repeat`, not `*`
+
+Considered: `busy * (1..)` and `wait(a) * 3` within `seq!`, after SVA's
+`[*n]`. It parses without ambiguity (an element is a boolean, and a boolean
+times an integer means nothing in Rust, so a top-level `*` can only be a
+repetition), but it looks like ordinary multiplication next to arithmetic
+in the same expressions (`count * 2 == x`), and ranges need parentheses
+(`busy * 1..` is `(busy * 1)..` in Rust). `repeat(n, s)` stays the one way
+to write a repetition.
 
 ### `implies`, not `then`
 
@@ -740,6 +1036,9 @@ Considered for the separator (in the forms that have one): `then` suggests
 `a then b` cannot be told from an implication.
 
 ### Blocks rather than closures
+
+(Superseded by `seq!`: sequence arguments are now one element or a
+`seq!`. Kept for the reasoning against closures.)
 
 A closure (`repeat(1.., || { busy; })`) matches Rust's intuition of code
 evaluated later and repeatedly, and is a value that could be passed around.
@@ -752,45 +1051,40 @@ Also rejected: properties as `async fn` with `delay(1).await`, which needs
 no macro rewriting but allocates a future per attempt and needs attempts
 forked for every match of a ranged delay.
 
-### Notation: (A) Rust statements, and (B) a function-like macro
+### Notation: Rust functions, with sequences in `seq!`
 
-Compared on twelve properties:
+Compared on twelve properties, then refined:
 
-- (A), adopted for now: Rust statements, as above. rustfmt and
-  rust-analyzer work; properties take six to ten lines each and have no
-  feeling of one continuing expression.
-- (B), kept as an alternative: a function-like macro with a syntax of its
-  own:
+- **(A) Rust statements**: sequences as `;`-separated statements
+  (`if { a; delay(1..=3); b; } { c; }`). rustfmt and rust-analyzer work
+  throughout; but properties take six to ten lines each, a sequence has no
+  feeling of one continuing expression, and a condition sequence needs the
+  unusual `if { .. } {` form. `->` cannot replace `;` there: rustc parses
+  an attributed function's body before the attribute sees it, and rejects
+  `a -> b` ("`->` is not valid syntax for field accesses and method
+  calls").
+- **(B) a function-like macro with a syntax of its own**
+  (`a delay(1..=3) b implies c`, or SVA-like `property!` declarations used
+  by asserts): reads most naturally and frees the notation entirely (named,
+  parameterized properties included). But rustfmt does not format it,
+  rust-analyzer barely helps inside it, and once the whole property is a
+  language of its own the question becomes whether to define a separate
+  language after all. Its strongest argument there would be expressions:
+  Rust's (`0xf`, no `a[3:0]`, Rust's integer rules) are not Veryl's
+  (`4'hf`, `a[3:0]`, `{a, b}`, Veryl's widths); a separate language would
+  also have its auxiliary logic in Veryl RTL rather than Rust, which suits
+  formal verification. Not taken now; the property IR keeps the way open.
+- **Also considered**: a comma-separated macro,
+  `prop!(a, delay(1..=3), b, implies, c)`, formatted by rustfmt, but with
+  the separator one argument among the others and no `let`.
+- **Adopted**: (A)'s Rust functions, with sequences only in `seq!` chained
+  by `->`: the structure (conditions in `if` headers, bodies, `let`s,
+  helpers, hooks) stays Rust that the tools handle, and only the sequences,
+  short as most are, are a token stream of the macro's.
 
-  ```rust
-  properties! {
-      for BridgeSva {
-          assert req_ack:
-              req implies delay(1..=4) ack;
-          assert b_then_c:
-              a delay(1..=3) b implies c;
-          cover fill_drain:
-              full delay(1..) empty;
-      }
-  }
-  ```
-
-  It reads most naturally (one or two lines a property, as SVA), and only
-  the temporal syntax is parsed by the macro (tokens from Rust, booleans by
-  `syn`). But rustfmt does not format it, rust-analyzer barely helps inside
-  it, the keywords become reserved, and the extent of an operand (after
-  `delay(1)`, up to which token?) and the boundary between same-cycle
-  elements need rules.
-
-- Also considered: a comma-separated macro,
-  `prop!(a, delay(1..=3), b, implies, c)`, whose arguments are Rust
-  expressions, so rustfmt formats it; the separator is one argument among
-  the others, and `let` cannot be written.
-
-Since both lower to the same property IR, (A) can be replaced by (B), or
-both kept, without touching the evaluation; best done before many
-properties are written. The rule against an `if` after a delay is specific
-to (A).
+Since every notation lowers to the same property IR, it can still be
+changed, or another added, without touching the evaluation; best done
+before many properties are written.
 
 ### Typed fields, not run-time-width values
 
@@ -809,6 +1103,6 @@ with four-state fields, deferred.
 ### `check!`, not `assert!`
 
 With failures ending the test, `assert!` would do (a panic poisons the
-runtime, which is not used afterwards). `check!` is introduced from the
+component, which is not used afterwards). `check!` is introduced from the
 start so that a limit on failures can be added without changing what users
 write.

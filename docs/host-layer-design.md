@@ -1,8 +1,9 @@
 # Host layer: design
 
 > **Status:** implemented as the crate `verald-host`, with the runtime
-> as its one subscriber; what the assertions will need of it (probes,
-> several subscribers in `export!`) is not yet. It records how the code that
+> as its one subscriber; what the assertions will need of it (several
+> subscribers in `export!`, the registrations and the start in the layer,
+> failures recorded, later probes) is not yet. It records how the code that
 > talks to Veryl's host API was separated from the runtime, so that layers
 > other than the testbench (assertions first) share it.
 
@@ -13,6 +14,7 @@
 - [Hooks](#hooks)
 - [Services](#services)
 - [Types](#types)
+- [Registrations and the start](#registrations-and-the-start)
 - [Exporting a component](#exporting-a-component)
 - [What stays in the layers above](#what-stays-in-the-layers-above)
 - [Migration](#migration)
@@ -27,7 +29,8 @@
   shared** among them, not reimplemented by each.
 - One component may hold several layers (a testbench and assertions); a
   component has one entry for its hooks, so the layers are dispatched to
-  from one place.
+  from one place. A component may also hold the assertions without the
+  testbench.
 - **Used within this project only.** The layer is a crate of Verald, not
   published for other components nor proposed to the SDK.
 - A light run comes first: static dispatch, no allocation or host call on
@@ -39,13 +42,14 @@
 
 ```text
 veryl-component             the SDK: the host API
-`-- verald-host          the hook entry and dispatch, the hook's context,
+`-- verald-host             the hook entry and dispatch, the hook's context,
     |                       services, value conversion, typed signals and
-    |                       modports, Signals / MemberSource, HostError
-    +-- verald-tb-runtime   executor, Clock / Reset, registrations,
-    |   |                   clocking, lifecycle, VERALD_ arguments
+    |                       modports, Signals / MemberSource, HostError,
+    |                       registrations and the start
+    +-- verald-tb-runtime   executor, Clock / Reset, clocking, lifecycle,
+    |   |                   VERALD_ arguments
     |   `-- verald-tb-core  methodology, report
-    +-- verald-assert    property engine, probes, its lifecycle
+    +-- verald-assert       property engine, probes, its lifecycle
     `-- (later layers)
 ```
 
@@ -71,6 +75,8 @@ pub trait HookSubscriber: Default {
     /// At `create`: ports and parameters are resolved, probes declared.
     fn on_build(&mut self, ctx: &mut BuildCtx) -> Result<(), HostError> { Ok(()) }
     fn on_init(&mut self) -> Result<(), HostError> { Ok(()) }
+    /// At the test module's `start`: the registrations are complete.
+    fn on_start(&mut self, test: Option<&str>) -> Result<(), HostError> { Ok(()) }
     fn on_clock(&mut self) -> Result<(), HostError> { Ok(()) }
     fn on_reset(&mut self) -> Result<(), HostError> { Ok(()) }
     fn on_finish(&mut self) -> Result<(), HostError> { Ok(()) }
@@ -94,7 +100,8 @@ pub trait HookSubscriber: Default {
   result, but a failure is then reported before what the testbench does at
   that edge.
 - **Errors**: a subscriber's `Err` is returned from the hook at once; the
-  remaining subscribers are not called for that hook.
+  remaining subscribers are not called for that hook. The layer records
+  it as a failure (`failed()`, below).
 - **The entry** (`entry::on_build`, `on_init`, `event` for `on_clock` and
   `on_reset`, `on_finish`): what the generated component's hooks call, with
   a closure calling the subscribers in order. It frames the hook (below)
@@ -144,6 +151,7 @@ same way. Four-state signals are deferred (see
 | `time()` | the current simulation time |
 | `log(line)` | a line of the test's output |
 | `fail(message)`, `finish()` | the end of the simulation |
+| `failed() -> bool` | whether the simulation has failed: `fail` called, or a subscriber's `Err` returned from a hook. The runtime does not report the finish a failure caused as an unexpected one |
 | `fired(port) -> bool` | whether the clock or reset `port` fired the current hook |
 | `seed() -> u64` | the instance's seed, taken at `create` |
 | `poisoned() -> bool` | whether a hook has unwound (see [Panic detection](#panic-detection)) |
@@ -276,10 +284,10 @@ pub trait Signals {
   modport port implement it too, since such a port does not arrive as a
   `ModportRef`.
 - `Signals` is a vocabulary, not a service: which names exist is decided by
-  whoever implements it. The runtime implements it over the test module's
-  registrations (`Start`, and the methodology's `Scope`), with
-  `type Members = ModportRef`; the assertions over an instance's ports and
-  observed signals, later. Code generated over `S: Signals` (an assertion
+  whoever implements it. The layer implements it over the test module's
+  registrations (`Registered`, below), with `type Members = ModportRef`;
+  `Start` and the methodology's `Scope` forward to it; the assertions
+  implement it over an instance's ports and observed signals, later. Code generated over `S: Signals` (an assertion
   block's binding) then binds the same way to either.
 - What a name means beyond a port (a `Clock` that tasks wait on) is the
   runtime's: see `Clocks` [below](#what-stays-in-the-layers-above).
@@ -317,6 +325,26 @@ condition names.
 direction, a width that does not fit) or an error from the host API. The
 runtime converts it to `TestError`; the assertions to their own reports.
 
+## Registrations and the start
+
+The test module names the signals the layers above bind to, then starts
+the component. Both are the layer's, so that a component without the
+testbench has them too:
+
+- **The registrations**: `set_clock`, `set_reset`, `set_interface`,
+  `set_input`, `set_output`, a table of names to ports. A name is
+  registered once; an interface's clock and reset members are registered
+  as `<name>.<member>`; a registered reset is tracked (`track_reset`).
+  `Registered` implements `Signals` over the table.
+- **The start**: the test module's `start` ends the registrations (one
+  after it is an error) and calls `on_start` of every subscriber, in
+  order: the assertions bind their blocks, the runtime starts its test.
+  With the testbench `start` takes the test's name; without it, none.
+
+What a name means beyond a port stays above: the runtime builds its
+`Clock` and `Reset` over the registered ports at `on_start`, and
+`set_master_clock` is its own method, checked against the table.
+
 ## Exporting a component
 
 `component!` / `export!` are wired to the runtime's `host` today. They are
@@ -324,13 +352,15 @@ to generate the layer's entry over a list of subscribers:
 
 ```rust
 verald::export!("tb", testbench = Methodology, assertions = [BusSva, FifoSva]);
+verald::export!("sva", assertions = [BusSva, FifoSva]);
 ```
 
 - The component struct holds one field per subscriber; each hook enters the
-  context and calls them in order.
-- The methods for the test module (`set_clock`, `set_interface`, `option`,
-  `start`, ..) are the runtime's and are generated only when the testbench
-  is among the subscribers; they forward to it.
+  context and calls them in order, the assertions before the testbench.
+- The registration methods and `start` are the layer's and generated for
+  every component. The testbench's own methods (`set_master_clock`,
+  `option`, `set`) are generated only when the testbench is among the
+  subscribers; they forward to it.
 - An assertions-only component (a DUT with `$tb::clock_gen` and no
   testbench) is exported without the runtime.
 
@@ -341,9 +371,9 @@ verald::export!("tb", testbench = Methodology, assertions = [BusSva, FifoSva]);
 - the executor, tasks and their concurrency, the shared parts (`sync`);
 - `Clock` and `Reset`: handles over the layer's ports that count edges and
   let tasks wait; the runtime asks `fired(port)` and `reset_asserted(port)`;
-- the registrations (`set_clock`, `set_interface`, ..), which implement the
-  layer's `Signals` (`host::Registered`, which `Start` and the
-  methodology's `Scope` forward to), and a runtime trait over it:
+- over the layer's registrations (`Registered`, which `Start` and the
+  methodology's `Scope` forward to), a runtime trait giving the names'
+  `Clock` and `Reset`, and clocking:
 
   ```rust
   pub trait Clocks: Signals {
@@ -358,8 +388,9 @@ verald::export!("tb", testbench = Methodology, assertions = [BusSva, FifoSva]);
   The prelude exports it, so `scope.clocking::<C>("clk")` reads as today;
 - clocking: `Driven<T>` (writing only what changed), `tick`, the waits,
   `drive`;
-- the lifecycle (setup, running, ended), the timeout, unexpected finishes;
-- the `VERALD_` arguments and the options.
+- the lifecycle (setup, running, ended), the timeout, unexpected finishes
+  (a finish after a failure, `failed()`, is not one);
+- the master clock, the `VERALD_` arguments and the options.
 
 **The assertions** (see [assertion-design.md](assertion-design.md)): the
 property engine, the probes (`Signals` and `MemberSource` for an instance),
@@ -401,6 +432,14 @@ Changes the steps made to the public API: `Signals` returns ports only and
 layer's) and `Value` fields are gone; the runtime arguments can be read
 from `create` on, not only after `start`.
 
+Still to do before the proof of concept, in the same way:
+
+7. The registrations' table and `Registered` moved to the layer, the
+   runtime's `Clock` and `Reset` built over it; `start` and `on_start`.
+8. `failed()`, and the runtime's unexpected finish skipped after a failure.
+9. `export!` over a list of subscribers, the runtime one of them; a
+   component without it.
+
 ## Deferred items
 
 - Probes and enumerating instances (changes to Veryl; see
@@ -432,6 +471,16 @@ the runtime, `Clock` and `Reset` included, shared by clocking and the
 assertions. `Clock` and `Reset` live on the runtime's state and wake its
 tasks, so such a layer stays tied to the runtime, and a layer using it
 does too. The cut is drawn at what talks to the host API instead.
+
+### Registrations and the start in the layer
+
+The registrations were the runtime's, so assertions could bind only in a
+component with the testbench. In the layer, a component holding the
+assertions alone has them too, and one with both registers each signal
+once. Only names to ports move: `Clock` and `Reset` wake the runtime's
+tasks and stay with it. The start moves with them, since it ends the
+registrations and every subscriber needs to know it (see
+[assertion-design.md](assertion-design.md#one-component-with-or-without-the-testbench)).
 
 ### `Signals` in the layer, not in the runtime
 
