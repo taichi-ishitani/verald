@@ -1650,10 +1650,12 @@ hierarchy.
 
 | Crate (directory) | Contents |
 |---|---|
-| `verald` (`crates/verald`) | the entry point users depend on: re-exports the others (`verald::host`, `verald::tb::{runtime, core}`, `verald::random`) with one prelude and `export!`; the parts are chosen by features (`tb` and `random` by default, `assert` later) |
+| `verald` (`crates/verald`) | the entry point users depend on: re-exports the others (`verald::host`, `verald::tb::{runtime, core}`, `verald::random`, `verald::assertion`) with one prelude and `export!`; the parts are chosen by features (`tb`, `random` and `assertion` by default) |
 | `verald-host` (`crates/host`) | the host layer: the hook entry and its dispatch, the hook's context and services, panic detection, value conversion, typed signals and modports, `Signals` (see [host-layer-design.md](host-layer-design.md)) |
 | `verald-macros` (`crates/macros`) | the proc macros shared by the parts: `#[modport]` |
 | `verald-macros-codegen` (`crates/macros/codegen`) | a library: `#[modport]`'s code generation and the parts `#[clocking]` shares with it, as functions both macro crates call |
+| `verald-assertion` (`crates/assertion`) | assertions: the blocks' traits, the subscriber binding and evaluating them (see [assertion-design.md](assertion-design.md)) |
+| `verald-assertion-macros` (`crates/assertion/macros`) | its proc macros (`#[assertions]`) |
 | `verald-random` (`crates/random`) | constrained random; depends on nothing else here, so it can be used on its own |
 | `verald-random-macros` (`crates/random/macros`) | its proc macros (`#[randomize]`, `#[constraints]`, ..) |
 | `verald-tb-runtime` (`crates/tb/runtime`) | the executor, tasks and their concurrency (`fork_scope`, `join`, `first`), waits for clocks and resets (`run_with_reset`), the shared parts (`Fifo`, events, `Semaphore`), clocking blocks, the registrations and Veryl's adapter as a subscriber of the host layer (`testbench`), the timeout, unexpected finishes |
@@ -1663,7 +1665,7 @@ hierarchy.
 
 Decided: the directories group the crates by part. What the parts share is
 at the top (`host`, `macros`); a part's crates are under its directory
-(`tb/`, `random/`, later `assert/`), each with its own macros. A crate's
+(`tb/`, `random/`, `assertion/`), each with its own macros. A crate's
 name joins its path (`crates/tb/runtime` is `verald-tb-runtime`). The
 entry point is `verald` alone, with features, rather than an entry point
 per part as well (`verald-tb`): one `export!` covers a component holding

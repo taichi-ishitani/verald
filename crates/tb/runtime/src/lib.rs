@@ -68,14 +68,26 @@ pub mod __private {
 ///
 /// The crate must depend on `veryl-component` directly: its derives name
 /// `::veryl_component`.
+///
+/// `before { field: Subscriber, .. } methods { .. }` adds subscribers
+/// dispatched before the runtime (the assertions) and their methods.
 #[macro_export]
 macro_rules! component {
     ($vis:vis $ty:ident, $tb:ty) => {
+        $crate::component!($vis $ty, $tb, before {} methods {});
+    };
+    (
+        $vis:vis $ty:ident, $tb:ty,
+        before { $($field:ident : $sub:ty),* $(,)? }
+        methods { $($methods:tt)* }
+    ) => {
         $crate::host::component! {
             /// The Verald testbench: the test module registers clocks,
             /// resets and interfaces, gives options and settings, then starts
             /// a test.
-            $vis struct $ty { runtime: $crate::testbench::Runtime<$tb> }
+            $vis struct $ty { $($field: $sub,)* runtime: $crate::testbench::Runtime<$tb> }
+
+            $($methods)*
 
             /// Starts the test `test`, as UVM's `run_test`.
             fn start(

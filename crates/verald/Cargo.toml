@@ -1,6 +1,6 @@
 [package]
 name = "verald"
-description = "Verald: verification for Veryl in Rust: a UVM-style testbench, constrained random, and later assertions."
+description = "Verald: verification for Veryl in Rust: a UVM-style testbench, constrained random, and assertions."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,13 +8,17 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+verald-assertion = { workspace = true, optional = true }
 verald-host.workspace = true
+verald-macros.workspace = true
 verald-random = { workspace = true, optional = true }
 verald-tb-core = { workspace = true, optional = true }
 verald-tb-runtime = { workspace = true, optional = true }
 
 [features]
-default = ["tb", "random"]
+default = ["tb", "random", "assertion"]
+# Assertions: SVA-like properties evaluated by the component.
+assertion = ["dep:verald-assertion"]
 # The UVM-style testbench: the runtime and the methodology.
 tb = ["dep:verald-tb-core", "dep:verald-tb-runtime", "random"]
 # Constrained random.

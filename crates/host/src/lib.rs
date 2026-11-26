@@ -31,8 +31,8 @@ pub use signal::{
 /// The test module's registrations, closed by `start`.
 pub mod registrations {
     pub use super::registry::{
-        Registered, clock, clocks, input, modport, output, reset, resets, set_clock, set_input,
-        set_modport, set_output, set_reset, started,
+        Registered, clock, clocks, input, instance_paths, modport, output, reset, resets,
+        set_clock, set_input, set_modport, set_output, set_reset, started,
     };
 }
 

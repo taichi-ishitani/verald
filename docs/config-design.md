@@ -105,19 +105,19 @@ ROUNDS = 20
 [[instances]]
 path = "dut"
 assertions = [
-  { block = "FifoSva" },                               # bound by member names
-  { block = "FifoSva", name = "fifo_sva2", map = { i_clk = "clk2" } },
+  { block = "FifoAssertions" },                               # bound by member names
+  { block = "FifoAssertions", name = "fifo_assertions2", map = { i_clk = "clk2" } },
 ]
 connections = { i_clk = "clk", bus = "bus.monitor" }   # reserved (probes)
 
 [[instances]]
 path = "**.u_fifo"
-assertions = [{ block = "FifoSva" }]
+assertions = [{ block = "FifoAssertions" }]
 
 # Defaults for every instance of a module (reserved: Veryl's metadata).
 [[modules]]
 name = "Fifo"
-assertions = [{ block = "FifoSva" }]
+assertions = [{ block = "FifoAssertions" }]
 connections = { i_clk = "i_clk" }                      # reserved (probes)
 ```
 
@@ -157,7 +157,7 @@ Within this order:
   (`tb.option`), which wins over the file's default.
 
 Reports name a bind by its `name` and its instance path
-(`FifoSva@dut`), since one bind with a wildcard or a module covers
+(`FifoAssertions@dut`), since one bind with a wildcard or a module covers
 several instances.
 
 ## The test module's methods
@@ -193,14 +193,14 @@ before the metadata, and dropped: the metadata is to come from Veryl.
 ### A file, not strings passed to the test module's methods
 
 Considered: the map passed as a string
-(`bind_assertions("BusSva", "bus=bus1, clk=clk2")`), and a map built by
+(`bind_assertions("BusAssertions", "bus=bus1, clk=clk2")`), and a map built by
 several calls (`map_assertions(..)`). Either needs a format or calls of
 its own; TOML gives a format with its tooling, and the file holds the
 other settings too. The methods are kept for binds by member names.
 
 ### Not in `export!`
 
-Rejected: the binds in `export!` (`assertions = [BusSva("bus")]`). It ties
+Rejected: the binds in `export!` (`assertions = [BusAssertions("bus")]`). It ties
 where blocks bind to the build of the component, so changing it means
 rebuilding, and one component could not be bound differently by two test
 modules. `export!` lists the blocks a component has; where they bind is

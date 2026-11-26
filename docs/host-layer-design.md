@@ -50,7 +50,7 @@ veryl-component             the SDK: the host API
     +-- verald-tb-runtime   executor, Clock / Reset, clocking, lifecycle,
     |   |                   VERALD_ arguments
     |   `-- verald-tb-core  methodology, report
-    +-- verald-assert       property engine, probes, its lifecycle
+    +-- verald-assertion       property engine, probes, its lifecycle
     `-- (later layers)
 ```
 
@@ -177,6 +177,22 @@ level asks the layer to track the port (`track_reset`), and the layer
 updates it before dispatching: asserted when `on_reset` fires for the port,
 released on `on_clock`. This is what the runtime does today; waiting for a
 reset (`Reset`, its wakers) stays in the runtime.
+
+In Veryl's simulator (`component_event` in `crates/simulator/src/simulator.rs`),
+within a reset window the testbench holds (`$tb::reset_gen`'s `assert`),
+each clock edge reaches components as the reset's event: one `on_reset` per
+edge, in place of `on_clock`, whether the reset is synchronous or
+asynchronous; the window's first edge (`assertion_edge`) does not call it
+twice. So for the layers above:
+
+- **`on_clock` does not see every edge.** Anything counted per edge (the
+  samples `past` reads in the assertions) moves on in `on_reset` too.
+- Dropping state at a reset belongs in `on_reset`.
+
+Not checked yet: a reset the design drives (a derived reset). The simulator
+fires its event once when it asserts (`fire_asserted_derived_resets`), not
+at every edge, so `on_clock` would run during it, with the tracked reset
+released.
 
 ## Types
 
@@ -334,7 +350,7 @@ subscribers, and the methods a layer adds:
 
 ```rust
 verald_host::component! {
-    pub struct Sva { assertions: MyAssertions }
+    pub struct Checks { assertions: MyAssertions }
 
     fn start(&mut self, ctx: &mut ::veryl_component::SimCtx) -> ::veryl_component::Result<()> {
         verald_host::entry::start(ctx, None, |test| self.__verald_on_start(test))
@@ -356,8 +372,8 @@ verald_host::component! {
   testbench, or alone (a DUT with `$tb::clock_gen` and no testbench):
 
   ```rust
-  verald::export!("tb", testbench = Methodology, assertions = [BusSva, FifoSva]);
-  verald::export!("sva", assertions = [BusSva, FifoSva]);
+  verald::export!("tb", testbench = Methodology, assertions = [BusAssertions, FifoAssertions]);
+  verald::export!("checks", assertions = [BusAssertions, FifoAssertions]);
   ```
 
 ## What stays in the layers above

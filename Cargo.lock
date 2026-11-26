@@ -279,10 +279,33 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 name = "verald"
 version = "0.1.0"
 dependencies = [
+ "verald-assertion",
  "verald-host",
+ "verald-macros",
  "verald-random",
  "verald-tb-core",
  "verald-tb-runtime",
+]
+
+[[package]]
+name = "verald-assertion"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "verald-assertion-macros",
+ "verald-host",
+ "verald-macros",
+ "veryl-component",
+]
+
+[[package]]
+name = "verald-assertion-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "verald-macros-codegen",
 ]
 
 [[package]]

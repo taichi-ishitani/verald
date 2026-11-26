@@ -73,7 +73,8 @@ module regblock (
     }
 }
 
-/// Runs a test of the testbench against the register block. The test, the
+/// Runs a test of the testbench against the register block, with the bus's
+/// assertions (`BusAssertions`) bound at the registered names. The test, the
 /// options and the test's values are given at run time, as runtime
 /// arguments:
 ///
@@ -97,8 +98,59 @@ module regblock_test {
         tb.set_reset("rst", rst);
         tb.set_modport("bus", bus.master);
         tb.set_modport("bus_mon", bus.monitor);
+        tb.bind_to_instance("", "BusAssertions");
         tb.start("BasicTest");
         clk.start();
         rst.assert(clk);
+    }
+}
+
+/// Checks the register block with the bus's assertions alone, no
+/// testbench: the test module drives the bus itself, writing every register
+/// and reading each back, a request held until `ready`.
+#[test(regblock_assertions_test)]
+module regblock_assertions_test {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen (clk);
+    inst bus: bus_if;
+    inst dut: regblock (
+        i_clk: clk       ,
+        i_rst: rst       ,
+        bus  : bus.slave ,
+    );
+    inst checks: $comp::verald_regblock_assertions;
+
+    // The requests made so far: writes to registers 0 to 7, then reads.
+    var count: logic<5>;
+
+    always_ff (clk, rst) {
+        if_reset {
+            count     = 0;
+            bus.valid = 0;
+            bus.write = 0;
+            bus.addr  = 0;
+            bus.wdata = 0;
+        } else if !bus.valid || bus.ready {
+            if count == 16 {
+                bus.valid = 0;
+            } else {
+                bus.valid = 1;
+                bus.write = count <: 8;
+                bus.addr  = count[2:0];
+                bus.wdata = 16'h0100 + count;
+                count     = count + 1;
+            }
+        }
+    }
+
+    initial {
+        checks.set_clock("clk", clk);
+        checks.set_reset("rst", rst);
+        checks.set_modport("bus_mon", bus.monitor);
+        checks.bind_to_instance("", "BusAssertions");
+        checks.start();
+        rst.assert(clk);
+        clk.next(40);
+        $finish();
     }
 }

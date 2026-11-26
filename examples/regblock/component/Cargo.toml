@@ -8,6 +8,8 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+regblock_assertions = { path = "../assertions" }
+regblock_vip = { path = "../vip" }
 verald = { path = "../../../crates/verald" }
 # The component derives refer to `::veryl_component`; the same revision as
 # the runtime's.

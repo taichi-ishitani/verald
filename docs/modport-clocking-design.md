@@ -121,7 +121,7 @@ struct AdderCb {
 }
 
 #[assertions]
-struct FifoSva {
+struct FifoAssertions {
     #[clock] i_clk: Clock,
     #[reset] i_rst: Reset,
     #[input] i_push: bool,

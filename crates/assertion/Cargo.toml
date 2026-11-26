@@ -1,0 +1,17 @@
+[package]
+name = "verald-assertion"
+description = "Assertions for Verald: SVA-like properties over a design's signals, evaluated by a component."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+verald-assertion-macros.workspace = true
+verald-host.workspace = true
+verald-macros.workspace = true
+num-bigint = "0.5"
+
+[dev-dependencies]
+veryl-component.workspace = true

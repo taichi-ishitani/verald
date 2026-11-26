@@ -1,4 +1,7 @@
 /target
 /component/target
+/assertions/target
+/vip/target
+/assertions_component/target
 /dependencies
 /.build

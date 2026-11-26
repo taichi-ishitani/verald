@@ -11,6 +11,10 @@ framework. Implementation proceeds step by step (the runtime's core first);
 - Before changing code, explain the purpose and get the user's approval.
 - The user decides where a piece of work ends.
 - Record design decisions in `docs/design.md` as they are made.
+- Before relying on when the simulator calls a component's hooks, read
+  [docs/host-layer-design.md](docs/host-layer-design.md) ("Hooks", "The
+  state of a reset"): in a reset the testbench holds, each edge calls
+  `on_reset`, not `on_clock`.
 - Design choices favour a light run over convenience, and follow the
   principles at the top of `docs/design.md`.
 

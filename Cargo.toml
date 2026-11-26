@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "crates/verald",
+    "crates/assertion",
+    "crates/assertion/macros",
     "crates/host",
     "crates/macros",
     "crates/macros/codegen",
@@ -22,6 +24,8 @@ repository = "https://github.com/taichi-ishitani/verald"
 publish = false
 
 [workspace.dependencies]
+verald-assertion = { path = "crates/assertion" }
+verald-assertion-macros = { path = "crates/assertion/macros" }
 verald-host = { path = "crates/host" }
 verald-macros = { path = "crates/macros" }
 verald-macros-codegen = { path = "crates/macros/codegen" }

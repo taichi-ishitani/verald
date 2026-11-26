@@ -10,12 +10,15 @@ The example is a Veryl project:
 
 ```text
 examples/regblock/
-├── Veryl.toml              the project, with the testbench as a component
+├── Veryl.toml              the project, with its two components
 ├── Makefile                runs every test, one after another
-├── src/regblock.veryl      the DUT, its bus, and the #[test] module
-└── component/              the testbench: a Rust crate
-    ├── Cargo.toml
-    └── src/lib.rs
+├── src/regblock.veryl      the DUT, its bus, and the #[test] modules
+├── vip/                    the bus VIP: a library crate (regblock_vip)
+├── assertions/             the bus's assertions: a library crate (regblock_assertions)
+├── component/              the testbench's component: the env, the tests
+│   ├── Cargo.toml
+│   └── src/lib.rs
+└── assertions_component/   a component holding the assertions alone
 ```
 
 Run it with `veryl +local test` in `examples/regblock`; the test and the
@@ -88,6 +91,7 @@ module regblock_test {
         tb.set_reset("rst", rst);
         tb.set_modport("bus", bus.master);    // the driver's side
         tb.set_modport("bus_mon", bus.monitor);
+        tb.bind_to_instance("", "BusAssertions");      // the bus's assertions, at these names
         tb.start("BasicTest");                  // the test, by its registered name
         clk.start();                            // runs until the test ends
         rst.assert(clk);
@@ -135,38 +139,56 @@ path = "component"
 ```
 
 The crate is a `cdylib` depending on `verald` and on `veryl-component`,
-which the derives behind `export!` name:
+which the derives behind `export!` name, and on the two library crates:
+the bus's VIP (`vip`, crate `regblock_vip`) and its assertions
+(`assertions`, crate `regblock_assertions`):
 
 ```toml
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
+regblock_assertions = { path = "../assertions" }
+regblock_vip = { path = "../vip" }
 verald = { path = "../../../crates/verald" }
 veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
 ```
 
-`src/lib.rs` imports the prelude, and at its end registers the tests and
-exports the testbench once:
+`src/lib.rs` imports the VIP and the prelude, and at its end registers
+the tests and exports the component once:
 
 ```rust
+use regblock_assertions::BusAssertions;
+use regblock_vip::*;
 use verald::prelude::*;
 
-// .. the VIP, the testbench and the tests ..
+// .. the testbench and the tests ..
 
 register_test!(BasicTest);
 register_test!(ReverseTest);
 register_test!(RandomTest);
 // DirectTest is a function marked `#[testcase]`, which registers itself
 
-verald::export!("verald_regblock");   // $comp::verald_regblock
+// $comp::verald_regblock: the testbench, and the bus's assertions
+verald::export!(
+    "verald_regblock",
+    testbench = Methodology,
+    assertions = [BusAssertions]
+);
 ```
+
+The VIP and the assertions are libraries, as a VIP shipped on its own
+would be. `BusAssertions` reads the bus through the VIP's monitor modport,
+`BusWatch`; it is shared with a second component
+(`assertions_component`) that holds the assertions alone, whose test
+module, `regblock_assertions_test`, drives the bus itself.
 
 ## 4. The bus VIP
 
-The first half of `lib.rs` is what a VIP for the bus would hold: the item,
-the configuration, the agent's parts and the agent, and a base for
-sequences (in [section 5](#5-sequences)).
+The VIP's crate (`vip/src/lib.rs`) holds the item, the configuration, the
+modports and clocking blocks, the agent's parts and the agent, and a base
+for sequences (in [section 5](#5-sequences)). The testbench's crate uses it
+through `use regblock_vip::*`.
 
 ### The item
 
@@ -261,8 +283,8 @@ pub struct DriverCb {
 `tick!(cb)` drives the outputs changed since the last tick, waits for the
 next edge of the clock, and samples the inputs, as SystemVerilog's
 `@(cb)`. `tick_until!(cb.bus.rvalid)` ticks until the condition holds.
-The monitor has its own pair, `BusWatch` (every member an input) and
-`MonitorCb`.
+The monitor has its own pair, `BusWatch` (every member an input; the
+bus's assertions read it too) and `MonitorCb`.
 
 ### The driver
 

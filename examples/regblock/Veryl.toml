@@ -4,3 +4,6 @@ version = "0.1.0"
 
 [[components]]
 path = "component"
+
+[[components]]
+path = "assertions_component"

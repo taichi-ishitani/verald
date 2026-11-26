@@ -9,8 +9,8 @@ are Rust crates that Veryl loads as verification components.
   clocking blocks; its tests are started from a Veryl `#[test]` module.
 - **Constrained random**: SystemVerilog's `rand`, `constraint` and
   `randomize()` on Rust structs, usable on its own.
-- **Assertions** (planned): SVA-like properties over the design's signals,
-  evaluated by a component.
+- **Assertions** (in progress): SVA-like properties over the design's
+  signals, evaluated by a component, beside the testbench or alone.
 
 The name is Verification + Emerald, after Veryl's Verilog + Beryl: the
 emerald is a variety of beryl.
@@ -167,12 +167,16 @@ randomize_with!(cmd, { a < 16; })?;
 
 See [docs/random.md](docs/random.md).
 
-## Assertions (planned)
+## Assertions (in progress)
 
 SVA-like concurrent assertions over the design's signals, written in Rust
-against the Veryl source and evaluated by a component at each clock edge;
-first on the test module's signals, later on every instance of a module.
-See the design study, [docs/assertion-design.md](docs/assertion-design.md).
+against the Veryl source and evaluated by a component at each clock edge,
+with auxiliary state and immediate checks; on the test module's signals,
+later on every instance of a module. Sequences (delays, `let`s, `wait`,
+`happen`, `repeat`, `throughout`, `until`, `ended`), implication,
+`eventually`, `never` and `past` are implemented, with named sequences
+and properties; covers will come with coverage. See [docs/assertion-design.md](docs/assertion-design.md)
+and `examples/regblock`.
 
 ## Getting started
 
@@ -219,7 +223,7 @@ by a runtime argument.
 
 | Example | Shows |
 |---|---|
-| [`examples/regblock`](examples/regblock) | the testbench's methodology: a register block on a valid/ready bus, a generated agent, a scoreboard, sequences, tests made from scenarios, constrained random. See the [walkthrough](docs/walkthrough.md) |
+| [`examples/regblock`](examples/regblock) | the testbench's methodology: a register block on a valid/ready bus, a generated agent, a scoreboard, sequences, tests made from scenarios, constrained random. See the [walkthrough](docs/walkthrough.md). The bus's VIP (`vip`) and its assertions (`assertions`) are library crates; the assertions run beside the testbench, and alone in a second test module (`regblock_assertions_test`, its component in `assertions_component`) |
 | [`examples/adder`](examples/adder) | the testbench's runtime alone: a clocking block driving an adder and checking its sums |
 | [`examples/hooks`](examples/hooks) | the testbench's runtime alone: how the simulator calls the testbench around a reset |
 
@@ -235,10 +239,12 @@ top, a part's crates are under its directory.
 
 | Crate | Directory | Contents |
 |---|---|---|
-| `verald` | `crates/verald` | the entry point: re-exports the others (`verald::host`, `verald::tb`, `verald::random`) with a prelude and `export!`; parts chosen by features |
+| `verald` | `crates/verald` | the entry point: re-exports the others (`verald::host`, `verald::tb`, `verald::random`, `verald::assertion`) with a prelude and `export!`; parts chosen by features |
 | `verald-host` | `crates/host` | the host layer: what talks to Veryl's host API (hooks, services, typed signals), shared by the parts |
 | `verald-macros` | `crates/macros` | the shared proc macros: `#[modport]` |
 | `verald-macros-codegen` | `crates/macros/codegen` | `#[modport]`'s code generation and the parts `#[clocking]` shares with it |
+| `verald-assertion` | `crates/assertion` | assertions: SVA-like properties evaluated by the component (sequences, implication, `eventually`, `never`, `past`) |
+| `verald-assertion-macros` | `crates/assertion/macros` | its proc macros (`#[assertions]`) |
 | `verald-random` | `crates/random` | constrained random, usable on its own |
 | `verald-random-macros` | `crates/random/macros` | its proc macros |
 | `verald-tb-runtime` | `crates/tb/runtime` | the testbench's runtime: the executor, tasks and their concurrency, clocks and resets, clocking blocks, the registrations |

@@ -1,9 +1,16 @@
 # Assertions: design study
 
-> **Status:** a design study, not implemented. It records what has been
-> decided about SVA-like assertions for Veryl's simulator, and why, so that
-> the proof of concept and later changes can refer back to it. Names of
-> crates, attributes and functions are tentative.
+> **Status:** a design, implemented in part (see
+> [Proof of concept](#proof-of-concept)): assertion blocks with
+> properties over cycles (`seq!` with `delay`, `let`, `wait`, `happen`,
+> `repeat`, `throughout`, `until` and `ended`, implication by `if`,
+> `eventually`, `never`, `past` and the functions on values), the reports
+> at the end, auxiliary state and `check!`, bound with `bind_to_instance`,
+> in `verald-assertion`, with named sequences and properties within an impl.
+> `#[cover]` waits for coverage (see [Deferred items](#deferred-items)).
+> It records what has been decided about SVA-like assertions for Veryl's
+> simulator, and why, so that the implementation and later changes can
+> refer back to it.
 
 ## Contents
 
@@ -43,9 +50,10 @@
 
 ## Overview
 
-Assertions are a crate of Verald, as constrained random is
-(`verald-random`): tentatively `verald-assert`, re-exported by
-`verald`.
+Assertions are a crate of Verald, paired with constrained random
+(`verald-random`, `crates/random`): `verald-assertion` (`crates/assertion`,
+its macros in `verald-assertion-macros`), re-exported by `verald` as
+`verald::assertion` under the feature `assertion`.
 
 ```text
 #[assertions] struct / impl                (compile time, proc macros)
@@ -80,7 +88,7 @@ use verald::prelude::*;
 
 #[assertions]
 #[derive(Default)]
-struct BridgeSva {
+struct BridgeAssertions {
     #[clock] clk: Clock,
     #[reset] rst: Reset,
     #[input] i_valid: bool,
@@ -100,7 +108,7 @@ struct BridgeSva {
 }
 
 #[assertions]
-impl BridgeSva {
+impl BridgeAssertions {
     // A combinational helper: a pure method
     fn req_fire(&self) -> bool {
         i_valid && i_ready
@@ -118,7 +126,7 @@ impl BridgeSva {
     #[assert]
     fn echo_data(&self) {
         if self.req_fire() {
-            let d = i_data;
+            let d: u32 = i_data;
             seq!(wait(o_valid && o_ready) -> o_data == d);
         }
     }
@@ -250,7 +258,7 @@ condition cannot be written.
 | `a until b` | `until(a, b)` | weak |
 | `s_eventually p` | `eventually(p)` | strong |
 | `not s` | `never(s)` | |
-| `(.., d = x)` | `let d = x` | an element of `seq!`; in a body, a plain `let` |
+| `(.., d = x)` | `let d: T = x` | an element of `seq!`; in a body, a plain `let`. Its type is written: see below |
 | `$past`, `$rose`, `$fell`, `$stable`, `$changed` | `past(x)`, `past(x, n)`, `rose(x)`, `fell(x)`, `stable(x)`, `changed(x)` | |
 | `$onehot`, `$onehot0`, `$countones` | `onehot(x)`, `onehot0(x)`, `countones(x)` | |
 
@@ -258,13 +266,30 @@ A sequence argument (`s` above) is one element as it is (`repeat(1.., busy)`,
 `throughout(busy, wait(done))`, `eventually(ack)`), or a chain in `seq!`
 (`never(seq!(grant -> delay(1) -> grant && !release))`).
 
+**A `let` kept across cycles has its type written**: a `let` within
+`seq!`, and a `let` in a body followed in its block by a statement holding
+a `seq!` (`let d: u32 = i_data;`). Its value is kept with the attempt, in
+a struct the macro generates, and a proc macro does not know the type of
+an expression. A `let` used within its cycle only is a plain Rust `let`,
+its type inferred. The type is `Clone + PartialEq + Default` (attempts
+with equal values merge).
+
+**`past` and the functions built on it read signals only**: `past(x, n)`
+evaluates `x` over the samples of `n` edges before (`n` a literal), so `x`
+names the block's signals, not its auxiliary state or `let`s. Before `n`
+edges have passed, the samples are zeros, as SVA's initial values. The
+samples are taken at every edge of the clock, during the reset too, as
+SVA's sampled values are whatever `disable iff` says: the simulator calls
+`on_reset` instead of `on_clock` at each edge while the reset is asserted,
+and both move the samples on.
+
 ### Examples
 
 Each with the SVA it stands for and how it reads:
 
 ```rust
 #[assertions]
-impl BridgeSva {
+impl BridgeAssertions {
     // SVA:  o_valid && !i_ready |=> o_valid && $stable(o_data)
     // Read: if o_valid && !i_ready: 1 cycle passes, and o_valid && stable(o_data)
     #[assert]
@@ -297,7 +322,7 @@ impl BridgeSva {
     #[assert]
     fn echo_data(&self) {
         if i_valid && i_ready {
-            let d = i_data;
+            let d: u32 = i_data;
             seq!(wait(o_valid && o_ready) -> o_data == d);
         }
     }
@@ -306,7 +331,7 @@ impl BridgeSva {
     // Read: if a, and keep data as d, and 1 cycle passes, and b: out == d
     #[assert]
     fn keep_mid_sequence(&self) {
-        if seq!(a -> let d = data -> delay(1) -> b) {
+        if seq!(a -> let d: u32 = data -> delay(1) -> b) {
             out == d;
         }
     }
@@ -391,7 +416,7 @@ and a cover (and later an assume):
 
 ```rust
 #[assertions]
-impl BridgeSva {
+impl BridgeAssertions {
     // SVA's `sequence handshake(valid, ready)`
     #[sequence]
     fn handshake(valid: bool, ready: bool) {
@@ -496,6 +521,11 @@ The semantics are SVA's (IEEE 1800, chapter 16) except where noted.
   asks for three rises in three consecutive cycles, which a one-bit signal
   cannot do (a rise needs the cycle before at 0), so it never matches;
   three rises with gaps are `happen(3, rose(a))`.
+- **An empty repetition is skipped** (deviation from SV): with a range
+  from 0, none at all leaves what follows at the same cycle, so
+  `repeat(0..=3, a) -> delay(1) -> b` with no `a` is `delay(1) -> b`,
+  where SVA's `a[*0:3] ##1 b` is `b`. See
+  [An empty repetition is skipped](#an-empty-repetition-is-skipped).
 - **`rose` / `fell`** look at the least significant bit, as `$rose` and
   `$fell` do.
 - **X and Z read as 0** (deviation from SV). Fields are converted as
@@ -547,7 +577,7 @@ Members bind by name, as clocking blocks' fields do, with the widths
 checked against the field types when bound; a map, where given, overrides
 some of the names. Binds of the same name at the same instance are an
 error (the name is the block's unless given); reports name a bind by its
-name and instance path (`FifoSva@dut0`). The proof of concept binds
+name and instance path (`FifoAssertions@dut0`). The proof of concept binds
 through the test module's methods only, by member names; the
 configuration file comes later.
 
@@ -572,7 +602,7 @@ module fifo_test {
         tb.set_clock("dut.i_clk", clk);
         tb.set_reset("dut.i_rst", rst);
         tb.set_modport("dut.bus", bus.monitor);
-        tb.bind_to_instance("dut", "FifoSva");
+        tb.bind_to_instance("dut", "FifoAssertions");
         tb.start("FifoTest");
         clk.start();
         rst.assert(clk);
@@ -610,7 +640,7 @@ the design rather than among the registered names:
 
 ```rust
 #[assertions]
-struct FifoSva {
+struct FifoAssertions {
     #[clock]   i_clk: Clock,
     #[reset]   i_rst: Reset,
     #[input]   i_push: bool,
@@ -692,7 +722,7 @@ struct BusMon {
 }
 
 #[assertions]
-struct BusSva {
+struct BusAssertions {
     #[clock]   clk: Clock,
     #[reset]   rst: Reset,
     #[modport] bus: BusMon,     // tb.set_modport("bus", bus.monitor)
@@ -700,7 +730,7 @@ struct BusSva {
 }
 
 #[assertions]
-impl BusSva {
+impl BusAssertions {
     #[assert]
     fn hold_while_stalled(&self) {
         if bus.valid && !bus.ready {
@@ -779,11 +809,14 @@ one per possibility still open). At run time:
   counts the attempts merged, for the report. So without `let`, the
   attempts of a property are bounded by the number of bit sets reached,
   even with unbounded ranges (`delay(1..)`).
-- **A `let` after a fork** (`delay(1..=3) -> let d = data -> ..`) takes a
+- **A `let` after a fork** (`delay(1..=3) -> let d: u32 = data -> ..`) takes a
   different value on each branch: such branches are split into attempts
   of their own when the `let` is taken.
-- Ranges with large bounds (`delay(m..=n)`, `repeat(m..=n, s)`) keep a
-  counter in the attempt rather than `n` states.
+- Ranges with large bounds (`delay(m..=n)`) keep `n` states, moved on by
+  a one-bit shift of the bit set's words: an edge costs `n / 64` words.
+  A counter in the attempt was considered and set aside: a thread may
+  enter one delay at several cycles (after a range before it), so one
+  counter per delay does not do, and counters do not merge as bits do.
 - The condition side of an implication starts an expectation at each of
   its matches (every match is checked); `never(s)`, covers and `ended(s)`
   only need whether a match happened.
@@ -849,12 +882,112 @@ Scope:
 - auxiliary state with `#[on_clock]` and `check!`;
 - failures ending the test.
 
-To be checked while building it:
+Implemented so far (`crates/assertion`, `examples/regblock`):
 
-- `#[test]` modules are not optimized, so their signals stay readable;
-- how a failure is reported (as an assertion failure with the time, not as
-  a crashed component);
-- when `on_reset` runs for a synchronous reset.
+- `#[assertions]` on the struct and the impl. The struct's signal fields
+  move to a generated signals struct, sampled at each edge; the fields left
+  are the auxiliary state (`Default`, re-initialized at a reset). The
+  struct's expansion defines a `macro_rules!` carrying the signals' names,
+  through which the impl's goes, so that bare names are rewritten into the
+  sampled values: **the struct comes before its impl, in the same module**.
+- Properties: `if` conditions without `else`, `let`s, and expectations,
+  every one of which must hold; a failure names the expectation as
+  written, and the attempt's start when it started at an earlier edge.
+- `seq!` with booleans, `delay(n)`, `delay(m..=n)`, `delay(m..)`,
+  `let name: T = x`, `wait(b)`, `happen(n, b)` (and ranges), `repeat(n, s)`
+  (and ranges), `throughout(a, s)`, and `ended(s)` as a boolean anywhere in
+  a property; as an expectation ending a body and as an `if`'s condition
+  (every match evaluates the body). A statement holding a `seq!` ends its
+  block. `repeat`'s and `happen`'s ranges may start at 0: none at all
+  skips the element (see [An empty repetition is skipped](#an-empty-repetition-is-skipped));
+  a count alone is 1 or more. `until(a, b)` is an element as well as a
+  property ending a body. `#[cover]` is an error (deferred).
+- `#[sequence]` and `#[property]` (see
+  [Named sequences and properties](#named-sequences-and-properties)),
+  expanded where used, before the NFA is built: a sequence's call is an
+  element (in `seq!`, or as a sequence argument), a property's call a
+  statement of a body. Arguments are substituted for the parameters as
+  tokens (in parentheses unless an operand of their own, such as a name, a
+  field or a call), not where a name is a field or a path's segment; the
+  body's `let`s are renamed per expansion; recursion, direct or not, is an
+  error, as is a named item used outside a property. The types are checked
+  by binding each argument, by reference, to a variable of its
+  parameter's type, in `if false` (checked by rustc, never evaluated: an
+  argument is evaluated where the body refers to it, not at the call): a
+  type error points at the argument and notes the parameter's type. A named
+  property that takes time (directly or through another) ends its body as
+  a `seq!` does.
+- `eventually(x)` and `never(s)` end a body. `eventually` is an
+  expectation `delay(0..) -> x`, strong; `never` a condition sequence of
+  its own whose match fails the property, reported with the attempt's
+  start.
+- At the end of the test (`on_finish`, not on a poisoned component), each
+  expectation's attempts still running are logged as incomplete (how
+  many, and the earliest start); a strong one's (`eventually`) fail the
+  test instead, unless it failed already: a test ended by a failure cuts
+  them short, so they are logged as incomplete too.
+- The engine as in [Attempts as bit sets](#attempts-as-bit-sets): each
+  `seq!` is built into an NFA whose states are points within a cycle,
+  linked within the cycle (a condition, a `let`), to the next edge (a
+  tick), or by a delay's chain of states. The macro generates a method per
+  state, visiting it at an edge, and one per `seq!` visiting the states a
+  branch occupies; the states are a bit set of `ceil(states / 64)` words.
+  A delay's range takes one state per cycle, moved on by an edge as a
+  one-bit shift of the words, so a long range costs its words, not its
+  states (no counter: a thread may enter one delay at several cycles).
+  `wait` and `happen` loop on a state until their condition holds;
+  `repeat` copies its sequence up to its count (an unbounded one loops on
+  its last copy), a `let` in it shared by the copies; `throughout` adds its
+  condition to every state and delay inside. Condition threads with equal
+  states and `let`s merge, keeping the earliest start; an expectation's
+  attempt holds one bit set per value of its `let`s, and attempts with
+  equal ones merge; a branch reaching a match by several paths counts once.
+  At an edge the `ended` matchers are stepped first, then the `seq!`s from
+  the last to the first, then the body, so what starts at an edge is not
+  stepped again there.
+- `ended(s)`: a matcher of its own per use, started at every edge and
+  stepped as a condition sequence; its result at the edge is passed to
+  every generated method. Its sequence runs apart from the attempts, so it
+  reads no `let` and holds no `ended`; elsewhere than in a property
+  (hooks, helpers) it is an error.
+- Errors point at what the user wrote: the code the macros write in
+  place of a name (a signal's read, a `let`'s, a check's reference) has
+  spans in the macro's context, so that its names resolve and its
+  parentheses are not linted, located at the user's name
+  (`Span::located_at`), so that rustc points a type error there. Which
+  span rustc reports is not guaranteed; if it changes, errors fall back to
+  the `#[assertions]` attribute, with nothing else affected.
+- `past(x)`, `past(x, n)`, `rose`, `fell`, `stable`, `changed` over the
+  samples of earlier edges (a ring of `n + 1` signals structs, moved on
+  at each edge by `on_clock` and, in reset, `on_reset`); `onehot`, `onehot0`, `countones` as functions on
+  `verald_assertion::Bits` (in `verald::prelude`).
+- `#[on_clock]` and `#[on_reset]` hooks, run after the properties;
+  `check!` in them, an error elsewhere.
+- Methods of the impl may call each other; the samples (and a hook's
+  report) are passed on as hidden arguments.
+- `bind_to_instance(path, block)`, wildcards included;
+  `bind_to_module` is an error saying it is not supported yet.
+- `verald::export!` with `assertions = [..]`, with the testbench or alone;
+  the subscriber is dispatched before the testbench.
+- `examples/regblock`: the same block (`regblock_assertions::BusAssertions`,
+  in a library crate shared by two components, over the VIP crate's
+  monitor modport) beside the testbench, and alone in a test
+  module driving the bus itself. The protocol is written with `seq!` and
+  `past`/`stable`; the registers' contents with auxiliary state and
+  `check!`. Bugs injected for a check (a master not holding its request,
+  wrong read data, `rvalid` after a write or never) were caught.
+
+Checked while building it:
+
+- `#[test]` modules' signals stay readable: the block reads the bus through
+  the monitor modport the test module registers;
+- a failure is reported as the assertion's (the property, the bind, the
+  time and the expectation), and the testbench does not report the finish
+  it causes as unexpected;
+- when `on_reset` runs: at each edge of a reset the testbench holds
+  (`$tb::reset_gen`), synchronous or asynchronous, in place of `on_clock`
+  (see [host-layer-design.md](host-layer-design.md#the-state-of-a-reset));
+  not checked yet: a reset the design drives.
 
 ## Formal verification: a later study
 
@@ -974,6 +1107,13 @@ for quick checks.
   definitions expanded into `macro_rules!` that pass their tokens on
   (compile time kept, complex), or properties built as IR at run time
   (simple, slower). Not before block reuse shows the need.
+- **`#[cover]`**, with functional and code coverage: a cover means
+  something only over a regression, its counts written per test and
+  merged into one report, and that report is wanted for functional
+  coverage (covergroups) and code coverage (the simulator's) first. So
+  covers wait for that machinery (per-test results, merging, reports),
+  and are one more source in it; `#[cover]` is an error until then (the
+  user's decision, 2026-11-28).
 - A limit on failures (`max_errors`).
 - Assertions on module instances, with the host API and metadata above
   (`bind_to_module`, `[[modules]]` and `connections` in
@@ -1101,6 +1241,19 @@ sampled-value functions are functions), `matched` (SVA's `.matched` is a
 different, multi-clock feature), `done` and `finished` (`done` is a common
 signal name).
 
+### An empty repetition is skipped
+
+`repeat(0..=3, a) -> delay(1) -> b` with no `a` reads as `delay(1) -> b`:
+none at all is nothing, and what follows goes on at the same cycle, as
+`->` (`&&` extended over time) suggests. SVA's empty match is not: there
+`a[*0:3] ##1 b` with no `a` is `b` at the start (`empty ##1 b` is `b`,
+the repetition taking a cycle of the delay after it), and `empty ##0 b`
+does not match. Both were weighed; the reading of the text was preferred
+(the user's decision), at the cost of SVA's `a[*0:n] ##1 b` not carrying
+over as written. `repeat(0..=1, a) -> b` is meaningful here (`b` at the
+start if there is no `a`). A count of 0 alone (`repeat(0, a)`) is an
+error.
+
 ### `repeat`, not `*`
 
 Considered: `busy * (1..)` and `wait(a) * 3` within `seq!`, after SVA's
@@ -1174,6 +1327,25 @@ Rejected: binding signals by names collected from the property bodies and
 holding their values as bit vectors of a width known only at run time,
 which is slower. Fields declared with Rust types, as in clocking blocks,
 are checked when bound and later generated from metadata.
+
+### Types written on `let`s kept across cycles
+
+A `let` whose value an attempt keeps is stored in a struct generated per
+property, and a proc macro cannot name an expression's type. Rejected:
+values kept as `Box<dyn Any>` (an allocation and a downcast per value);
+the type inferred when the `let` is a bare `#[input]` field (the
+macro knows those types, but not a modport member's or an expression's,
+so the rule would depend on the expression). Written types are checked
+by rustc, and a `let` used within its cycle keeps Rust's inference.
+
+### `past` over the samples of earlier edges
+
+`past(x, n)` keeps the signals' samples of `n` edges: the block's signals
+struct is bound `n + 1` times, as a ring, and each edge reads into the
+oldest. `x` is evaluated with its names read from the sample `n` edges
+back, so the macro needs no type of `x` and nothing is cloned. Rejected:
+a history per `past` call of the value of `x` (needs the type of `x`).
+The cost is that `x` reads signals only.
 
 ### X and Z read as 0
 

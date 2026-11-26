@@ -75,7 +75,61 @@ impl Parse for InitArg {
     }
 }
 
+/// Removes the tagged fields of a struct and returns their specs, leaving
+/// the fields without a role attribute (an assertion block's auxiliary
+/// state) in the struct.
+pub fn take_tagged_fields(item: &mut ItemStruct, roles: &[Role]) -> syn::Result<Vec<FieldSpec>> {
+    let Fields::Named(fields) = &mut item.fields else {
+        return Err(syn::Error::new(
+            item.span(),
+            "expected a struct with named fields",
+        ));
+    };
+    let mut specs = Vec::new();
+    let mut rest = syn::punctuated::Punctuated::new();
+    for mut field in std::mem::take(&mut fields.named) {
+        match field_role(&mut field, roles)? {
+            Some((role, init)) => {
+                let ident = field.ident.clone().expect("named field");
+                specs.push(FieldSpec {
+                    name: ident.unraw().to_string(),
+                    ident,
+                    ty: field.ty.clone(),
+                    role,
+                    init,
+                });
+            }
+            None => rest.push(field),
+        }
+    }
+    fields.named = rest;
+    Ok(specs)
+}
+
 fn take_role(field: &mut Field, roles: &[Role]) -> syn::Result<(Role, Option<Expr>)> {
+    field_role(field, roles)?.ok_or_else(|| {
+        let names: Vec<&str> = roles
+            .iter()
+            .map(|role| match role {
+                Role::Input => "`#[input]`",
+                Role::Output => "`#[output]`",
+                Role::Modport => "`#[modport]`",
+                Role::Clock => "`#[clock]`",
+                Role::Reset => "`#[reset]`",
+            })
+            .collect();
+        let expected = match names.split_last() {
+            Some((last, [])) => last.to_string(),
+            Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+            None => String::new(),
+        };
+        syn::Error::new(field.span(), format!("the field needs {expected}"))
+    })
+}
+
+/// Removes the field's role attribute and returns the role (and an
+/// output's initial value); `None` for a field with none.
+fn field_role(field: &mut Field, roles: &[Role]) -> syn::Result<Option<(Role, Option<Expr>)>> {
     let mut role = None;
     let mut init = None;
     let mut rest = Vec::new();
@@ -105,25 +159,7 @@ fn take_role(field: &mut Field, roles: &[Role]) -> syn::Result<(Role, Option<Exp
         }
     }
     field.attrs = rest;
-    let role = role.ok_or_else(|| {
-        let names: Vec<&str> = roles
-            .iter()
-            .map(|role| match role {
-                Role::Input => "`#[input]`",
-                Role::Output => "`#[output]`",
-                Role::Modport => "`#[modport]`",
-                Role::Clock => "`#[clock]`",
-                Role::Reset => "`#[reset]`",
-            })
-            .collect();
-        let expected = match names.split_last() {
-            Some((last, [])) => last.to_string(),
-            Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
-            None => String::new(),
-        };
-        syn::Error::new(field.span(), format!("the field needs {expected}"))
-    })?;
-    Ok((role, init))
+    Ok(role.map(|role| (role, init)))
 }
 
 /// Binds the fields' values: an output's initial value where it has one

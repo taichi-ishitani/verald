@@ -157,6 +157,33 @@ pub fn set_output(name: String, sig: OutputPort) -> Result<(), HostError> {
     Ok(())
 }
 
+/// The instance paths the registered names imply, read as a hierarchy: the
+/// root (`""`), every proper prefix of a name (`"dut"` of `"dut.i_clk"`),
+/// and every modport's name, whose members are its own. In the order first
+/// met.
+pub fn instance_paths() -> Vec<String> {
+    let mut paths = vec![String::new()];
+    let mut add = |path: &str| {
+        if !paths.iter().any(|p| p == path) {
+            paths.push(path.to_string());
+        }
+    };
+    with(|r| {
+        for (name, entry) in &r.entries {
+            let mut end = 0;
+            while let Some(dot) = name[end..].find('.') {
+                end += dot;
+                add(&name[..end]);
+                end += 1;
+            }
+            if matches!(entry, Entry::Modport(_)) {
+                add(name);
+            }
+        }
+    });
+    paths
+}
+
 /// The clocks registered, in the order registered (an interface's clock
 /// members at the interface's place).
 pub fn clocks() -> Vec<(String, ClockPort)> {

@@ -1,0 +1,17 @@
+[package]
+name = "verald-assertion-macros"
+description = "The procedural macros of verald-assertion."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "visit", "visit-mut"] }
+verald-macros-codegen.workspace = true

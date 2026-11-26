@@ -46,11 +46,11 @@ pub mod prelude {
     pub use crate::{
         AgentConfig, AnalysisExport, AnalysisFifo, AnalysisPort, BundledSpecs, CheckContext,
         Component, DefaultSequence, DriverPort, HasBase, HasContext, Instance, InstanceContext,
-        IntoContext, IntoHandle, ItemHandle, ItemWaiter, Kind, Knob, MonitorPort, OptInstance,
-        ReactiveSequence, ReactiveSequencer, ReportContext, RequestPort, RunContext, Scenario,
-        Scope, SeqItemPort, Sequence, SequenceCore, Sequencer, SequencerHandle, SetupContext, Spec,
-        Subscriber, Test, bundled_specs, component, register_test, sequence, sequence_item,
-        testcase,
+        IntoContext, IntoHandle, ItemHandle, ItemWaiter, Kind, Knob, Methodology, MonitorPort,
+        OptInstance, ReactiveSequence, ReactiveSequencer, ReportContext, RequestPort, RunContext,
+        Scenario, Scope, SeqItemPort, Sequence, SequenceCore, Sequencer, SequencerHandle,
+        SetupContext, Spec, Subscriber, Test, bundled_specs, component, register_test, sequence,
+        sequence_item, testcase,
     };
 }
 

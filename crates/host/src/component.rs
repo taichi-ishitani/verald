@@ -11,7 +11,7 @@
 ///
 /// ```ignore
 /// verald_host::component! {
-///     pub struct Sva { assertions: MyAssertions }
+///     pub struct Checks { assertions: MyAssertions }
 ///
 ///     fn start(&mut self, ctx: &mut ::veryl_component::SimCtx) -> ::veryl_component::Result<()> {
 ///         verald_host::entry::start(ctx, None, |test| self.__verald_on_start(test))
