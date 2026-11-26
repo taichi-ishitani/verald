@@ -1231,73 +1231,18 @@ Decided:
     wait;
   - a waker carries only a task id: cloning is a copy, with no reference
     count; the ready queue is a `VecDeque` of task ids;
-  - a clocking block keeps its members as plain fields:
-    `tick` reads the inputs it declares, nothing else. A conditional wait
-    (`tick_until!`, `tick_while!`, `posedge!`, ..) reads, while it waits,
-    only the members its condition refers to, found in the condition by the
-    macro, and all inputs at the edge it ends: a monitor idle until `psel`
-    reads one signal per edge. Fields not read meanwhile are stale, but only
-    the condition runs while waiting. A condition the macro cannot see into
-    (a method on the block) reads all inputs at each edge. The gain is the
-    reading and conversion on the Rust side: Veryl's simulator copies a
-    component's inputs at every edge it hears regardless.
+  - a clocking block reads only what it needs: `tick` its declared
+    inputs, a conditional wait only what its condition names (see
+    [modport-clocking-design.md](modport-clocking-design.md#reading-only-what-a-wait-needs)).
 
 ### Clocking blocks
 
-Decided (implemented in the runtime, the macros in `verald-tb-macros`); what
-users see follows rustdv-veryl's clocking blocks:
-
-- A `#[clocking]` struct is a clocking block, as SystemVerilog's
-  `clocking cb @(posedge clk)`. Its fields are `#[input]` (sampled) and
-  `#[output]` (driven) signals, and `#[modport]` fields, structs declaring a
-  modport's members the same way. A signal need not belong to an interface
-  (an interrupt).
-- `Cb::new(signals, clock, CbPaths::default())` binds each field by its name
-  among what the test module registered: an interface (`set_interface`) for
-  a modport field, whose members bind by their names; a signal registered
-  with `set_input` / `set_output`, or an interface's member by a dotted path
-  (`"bus.done"`), for a signal field. The generated `<Name>Paths` struct
-  overrides the path of any field. `signals` is anything implementing
-  `Signals`: `Start` now, the methodology's `Scope` later. `Signals` also
-  gives the short forms `scope.clocking::<Cb>("clk")?` (every field at its
-  own name, the clock by its registered name) and
-  `scope.clocking_with("clk", CbPaths { .. })?` (the block's type following
-  from its paths' type); `new` remains for a clock given as a `Clock`.
-  Widths are checked
-  against the fields' types at construction. Clocking stays on the
-  component's side, not in Veryl (see
-  [veryl-proposals.md](veryl-proposals.md#clocking-blocks-as-a-language-feature-a-study)),
-  so the clock is given here.
-- Field types implement `SignalValue`: `bool`, the unsigned integers up to
-  `u128` and `BigUint` (any width). Signals are two-state: X and Z read as
-  0, as SystemVerilog's conversion to two-state types, and each type reads
-  and writes itself through the host layer's direct paths (see
-  [host-layer-design.md](host-layer-design.md#two-state-signals-first)).
-- Fields start at zero. An output is written when it differs from the value
-  last written (zero at first), so an output never assigned is never
-  driven and the design's value stands; `tick` writes the changed outputs
-  before waiting, `drive` writes them at once.
-- An output may declare an initial value, its idle value:
-  `#[output(init = false)] start: bool`, in a clocking block or a modport.
-  The field starts at it, taken as already driven; `cb.init()` assigns
-  every such output its value and drives it at once, whatever was last
-  driven, so a reset brings the bus to idle in one call
-  (`run_with_reset(rst, &mut cb, |cb| cb.init(), ..)`). An output
-  declares it where it is declared: in its modport, or, for a signal of its
-  own, in the clocking block. An output with no initial value has none
-  (it is uninitialized, as an undriven signal is undefined), so `init`
-  leaves it alone.
-- `tick!(cb)`, and the waits `posedge`, `negedge`, `edge`, `changed`,
-  `wait`, `tick_until`, `tick_while`, as methods taking a closure (reading
-  every input at each edge) and as macros (reading only what the condition
-  names while waiting, see above); the `_within` forms of the macros give
-  up after a number of edges with a `ClockingTimeout`, which `?` turns into
-  a fatal error naming the condition.
-- The macros' generated code names the runtime through the crate the user
-  depends on, `verald` (as `verald::tb::runtime`) or `verald-tb-runtime`.
-- `run_with_reset(reset, state, on_reset, body)` is in the runtime: it runs
-  `on_reset`, waits for the release, runs `body` until the next assertion
-  (dropping it, with what it forked), and starts over.
+Decided and implemented: a `#[clocking]` struct is a clocking block, as
+SystemVerilog's `clocking cb @(posedge clk)`, over `#[input]` and
+`#[output]` signals and `#[modport]` fields, bound by name among the test
+module's registrations, with `tick`, the waits and `run_with_reset`. The
+clock is to become a field (`#[clock]`), as in assertion blocks. See
+[modport-clocking-design.md](modport-clocking-design.md).
 
 ### Concurrency within a component
 
@@ -1672,6 +1617,9 @@ Decided:
     SDK's `TryFrom<&ArgValue>`, so a testbench can read its own types.
   - The report's summary lists the arguments given, beside the seed, so a
     log shows how its run was made.
+  - Their defaults may be given in the project's configuration file,
+    `Verald.toml` (designed, not implemented; see
+    [config-design.md](config-design.md)), below the test module's.
 
   Only this is implemented at first. Setting the options from the
   testbench's code (in a test's `setup` or a spec's `pre_build`, UVM's
@@ -1744,6 +1692,10 @@ the split costs nothing per edge.
 The host layer (`verald-host`) is below the runtime: what talks to
 Veryl's host API, which the runtime and the assertions both build on. See
 [host-layer-design.md](host-layer-design.md).
+
+The project's configuration file, `Verald.toml` (defaults of runtime
+arguments, the assertions bound, later the signals registered), is read
+by the host layer: see [config-design.md](config-design.md).
 
 ## Implementation notes
 

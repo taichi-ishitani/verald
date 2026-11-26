@@ -78,9 +78,11 @@ auxiliary state. The impl holds the properties and the hooks.
 ```rust
 use verald::prelude::*;
 
-#[assertions(clock = "clk", reset = "rst")]
+#[assertions]
 #[derive(Default)]
 struct BridgeSva {
+    #[clock] clk: Clock,
+    #[reset] rst: Reset,
     #[input] i_valid: bool,
     #[input] i_ready: bool,
     #[input] i_data: u32,
@@ -152,6 +154,12 @@ impl BridgeSva {
   tools and is not provided.
 - A property takes `&self` and a hook `&mut self`; the macros reject a
   property that changes state.
+- The clock and the reset are fields too, marked `#[clock]` and
+  `#[reset]`, of the prelude's `Clock` and `Reset`: one clock, and at most
+  one reset. They bind as the other members do (see
+  [Binding to the design](#binding-to-the-design)), and clocking blocks
+  declare theirs the same way (see
+  [modport-clocking-design.md](modport-clocking-design.md#clock-and-reset-as-fields)).
 - Signal fields are named in property bodies by their bare names; auxiliary
   state through `self`.
 - Field types are those of clocking blocks (`SignalValue`): `bool`, the
@@ -451,8 +459,8 @@ The semantics are SVA's (IEEE 1800, chapter 16) except where noted.
 - **Attempts**: every property starts an attempt at every edge of its
   clock; attempts run concurrently, each with its own copies of `let`
   variables.
-- **Clock and reset**: given per assertion block (`clock = ..`,
-  `reset = ..`). Properties are evaluated at `on_clock` and attempts
+- **Clock and reset**: given per assertion block (its `#[clock]` and
+  `#[reset]` fields). Properties are evaluated at `on_clock` and attempts
   dropped at `on_reset`, as the simulator calls them; no edge or polarity
   is written or looked at. A block without a reset is never disabled. Properties of another clock
   domain go in another block; a property cannot override its block's clock.
@@ -522,11 +530,34 @@ each expressed differently:
 
 ## Binding to the design
 
-### Proof of concept: the test module's signals
+A block's definition does not say where it binds. Its members, its
+clock and reset among them (`#[clock] i_clk: Clock` names a member of the
+block, not a registration), are names of its own; where the block is bound, and to
+which signals, is given when it is bound. The same block is bound in
+several places, each with its own state.
 
-Signals are bound as clocking blocks bind them: by field name among what the
-test module registered, with the widths checked against the field types when
-bound.
+Blocks are bound in two ways, which may be used together:
+
+- **from the test module**, through the component's methods (below);
+- **from the configuration file**, `Verald.toml`, which also gives a bind
+  a name and a map of its members to other names. See
+  [config-design.md](config-design.md).
+
+Members bind by name, as clocking blocks' fields do, with the widths
+checked against the field types when bound; a map, where given, overrides
+some of the names. Binds of the same name at the same instance are an
+error (the name is the block's unless given); reports name a bind by its
+name and instance path (`FifoSva@dut0`). The proof of concept binds
+through the test module's methods only, by member names; the
+configuration file comes later.
+
+### The test module's signals
+
+The names the test module registers are read as instance paths: a
+registered name `a.b.c` is the member `c` of the instance `a.b` (see
+[config-design.md](config-design.md#instance-paths)). A block bound at an
+instance path `p` binds each member to the registered name `p.<member>`;
+at the empty path, to the member's own name.
 
 ```veryl
 #[test(fifo_test)]
@@ -538,9 +569,10 @@ module fifo_test {
     inst tb : $comp::verald_fifo;      // testbench and assertions in one component
 
     initial {
-        tb.set_clock("clk", clk);
-        tb.set_reset("rst", rst);
-        tb.set_interface("bus", bus.master);
+        tb.set_clock("dut.i_clk", clk);
+        tb.set_reset("dut.i_rst", rst);
+        tb.set_interface("dut.bus", bus.monitor);
+        tb.bind_to_instance("dut", "FifoSva");
         tb.start("FifoTest");
         clk.start();
         rst.assert(clk);
@@ -548,9 +580,14 @@ module fifo_test {
 }
 ```
 
+| Method | Does |
+|---|---|
+| `bind_to_instance(path, block)` | binds `block` at the instance `path` (wildcards allowed), by member names |
+| `bind_to_module(module, block)` | binds `block` at every instance of `module` (reserved: needs Veryl's metadata) |
+
 - The component is instantiated explicitly in the test module. A
   testbench that already registers its signals needs no extra wiring for
-  its assertions.
+  its assertions beyond the bind.
 - Without a testbench, the component exports the assertions alone and is
   used the same way: the test module registers the signals and starts it
   (a DUT driven by `$tb::clock_gen` and the test module's own `initial`).
@@ -560,22 +597,22 @@ module fifo_test {
 - It relies on references passed to component methods
   ([veryl-lang/veryl#3701](https://github.com/veryl-lang/veryl/pull/3701)),
   so it runs on the `tbf` branch with `veryl +local`.
-- Blocks are bound when the component starts, once the registrations are
-  complete. How a block is registered (in `export!`, or by a method) is to
-  be decided. Whatever it is,
-  it takes where the block binds (a name, or paths as clocking blocks'
-  `<Name>Paths`) from the first version, not only the block's type, so
-  that the same block can later be registered several times without
-  changing what users write.
+- Blocks are bound when the component starts, once the registrations and
+  the configuration are complete. `export!` lists the blocks a component
+  has; where they bind is not in it.
 
 ### Later: module instances
 
 The aim is assertions written for a module and applied to all its instances,
-wherever they are in the hierarchy:
+wherever they are in the hierarchy, bound with `bind_to_module`
+or `[[modules]]` in the configuration, and with instance paths resolved in
+the design rather than among the registered names:
 
 ```rust
-#[assertions(target = "Fifo", clock = "i_clk", reset = "i_rst")]
+#[assertions]
 struct FifoSva {
+    #[clock]   i_clk: Clock,
+    #[reset]   i_rst: Reset,
     #[input]   i_push: bool,
     #[input]   i_pop: bool,
     #[input]   full: bool,
@@ -643,7 +680,8 @@ What the layer is to gain before the proof of concept:
 
 A `#[modport]` struct a testbench declares for its monitor (all members
 `#[input]`) is used as it is in an assertion block, so an interface's
-signals are declared once:
+signals are declared once (`#[modport]` itself is described in
+[modport-clocking-design.md](modport-clocking-design.md#typed-modports)):
 
 ```rust
 #[modport]
@@ -653,8 +691,10 @@ struct BusMon {
     #[input] data: u32,
 }
 
-#[assertions(clock = "clk", reset = "rst")]
+#[assertions]
 struct BusSva {
+    #[clock]   clk: Clock,
+    #[reset]   rst: Reset,
     #[modport] bus: BusMon,     // tb.set_interface("bus", bus.monitor)
     outstanding: u32,           // auxiliary state
 }
@@ -718,6 +758,44 @@ auxiliary state; at `on_finish`, incomplete attempts and cover counts are
 reported. Bound instances on module instances, later, are evaluated the
 same way.
 
+### Attempts as bit sets
+
+Each sequence is lowered to an NFA (states that may be occupied at once,
+one per possibility still open). At run time:
+
+- **An attempt is allocated at each start** (each cycle its condition
+  starts it), holding a bit set of the NFA states its branches occupy,
+  its start time and its `let` variables. The attempts of a property are
+  kept in a `Vec` reused from edge to edge.
+- **Branches within an attempt are advanced by bit operations**: at each
+  edge, its bits and the sampled values give the next bits, a fork being
+  several bits set. No allocation, and branches in the same state merge by
+  themselves.
+- **An attempt ends** when one branch matches (an expectation needs one
+  match: the attempt succeeds and is dropped), or when its bit set is
+  empty (it fails, reported with its start time).
+- **Attempts with equal bit sets and `let` values merge**: their futures
+  are the same. The merged attempt keeps the earliest start time and
+  counts the attempts merged, for the report. So without `let`, the
+  attempts of a property are bounded by the number of bit sets reached,
+  even with unbounded ranges (`delay(1..)`).
+- **A `let` after a fork** (`delay(1..=3) -> let d = data -> ..`) takes a
+  different value on each branch: such branches are split into attempts
+  of their own when the `let` is taken.
+- Ranges with large bounds (`delay(m..=n)`, `repeat(m..=n, s)`) keep a
+  counter in the attempt rather than `n` states.
+- The condition side of an implication starts an expectation at each of
+  its matches (every match is checked); `never(s)`, covers and `ended(s)`
+  only need whether a match happened.
+
+Rejected: one bit set per property shared by all its attempts (the
+bit-parallel matching of regular expressions). It is the lightest, but
+loses which attempt a branch belongs to: no start time in reports, no
+`let` values, and failures missed, since an attempt whose last branch dies
+cannot be told from one whose branches live on in the same bits. Also
+rejected: branches kept one by one in a list as the only form, which
+needs a copy per fork and a merge by comparison where bit operations do.
+
 Possible optimizations:
 
 - Staging only the inputs bound to the event that fired (today every input
@@ -763,8 +841,9 @@ Scope:
 
 - one component, with the testbench or without it, through `export!`
   over subscribers;
-- assertion blocks on the test module's signals, bound through the
-  registrations, which the host layer keeps;
+- assertion blocks on the test module's signals, bound at instance paths
+  among the registrations, which the host layer keeps, with
+  `bind_to_instance` (`Verald.toml` comes later);
 - the temporal syntax above, compiled through the property IR into state
   machines;
 - auxiliary state with `#[on_clock]` and `check!`;
@@ -884,9 +963,10 @@ for quick checks.
 - **Reusing assertion blocks** (next after the first version), as SVA's
   checkers bound in several places: an assertion block is a Rust type, so
   the same block is instantiated for several interfaces, from a shared
-  crate too (a VIP's). Needed: generating `<Name>Paths` for it, as
-  clocking blocks have; registering a block several times; and, for
-  interfaces of other widths, generic blocks and modport structs, which
+  crate too (a VIP's). Binding one block several times, and maps of its
+  members, come with the first version (see
+  [Binding to the design](#binding-to-the-design)). Needed for
+  interfaces of other widths: generic blocks and modport structs, which
   `#[modport]` rejects today (`check_plain` in the macros' codegen), or
   fields of `BigUint` at a cost in speed.
 - Named sequences and properties across impls and crates (a library of
@@ -895,7 +975,9 @@ for quick checks.
   (compile time kept, complex), or properties built as IR at run time
   (simple, slower). Not before block reuse shows the need.
 - A limit on failures (`max_errors`).
-- Assertions on module instances, with the host API and metadata above.
+- Assertions on module instances, with the host API and metadata above
+  (`bind_to_module`, `[[modules]]` and `connections` in
+  [config-design.md](config-design.md) are reserved for them).
 - Structs generated from metadata.
 - Emitting SVA from the property IR.
 
@@ -1099,6 +1181,13 @@ Considered: evaluating properties in four states, to match SV where X
 makes a condition false, or failing on a sample with X or Z. Chosen: the
 two-state conversion of clocking blocks; explicit checks for X and Z come
 with four-state fields, deferred.
+
+### Clock and reset as fields, as in clocking blocks
+
+The clock and the reset are fields marked `#[clock]` and `#[reset]`, bound
+by name with the other members, in assertion blocks and clocking blocks
+alike. The reasons and the alternatives rejected are in
+[modport-clocking-design.md](modport-clocking-design.md#clock-and-reset-as-fields).
 
 ### `check!`, not `assert!`
 

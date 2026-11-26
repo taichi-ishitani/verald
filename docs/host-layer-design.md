@@ -294,30 +294,10 @@ pub trait Signals {
 
 ### Typed modports
 
-`#[modport]` generates, for its struct:
-
-- `ModportRead`: binding from a `MemberSource` (`__bind`, widths checked)
-  and loading every input field (`__load`);
-- `InputOnly`, a marker, when the struct has no `#[output]` field. An
-  assertion block requires it of its `#[modport]` fields, so a modport
-  for driving is rejected at compile time.
-
-Storing the output fields, only those that changed, is clocking's: the
-runtime's `ModportDrive` (`__store`, `__init`), over the `Driven<T>` the
-macro generates for each output.
-`#[modport]` is `verald-macros`', its generation `verald-macros-codegen`'s
-(see [design.md](design.md#crate-layout)). It names the layer's crate
-through `proc-macro-crate` (`verald::host`, `verald_host`, or the
-runtime's re-export), and generates the parts driving outputs
-(`Driven<T>`, `ModportDrive`) only where the testbench's runtime is
-reached; without it, an `#[output]` field is an error.
-
-What `#[clocking]` and the wait macros use of a modport struct, and so
-what a struct generated otherwise (by Veryl, veryl-lang/veryl#3712) has
-to give: `ModportRead` (`__bind`, `__load`), `ModportDrive` (`__store`,
-`__init`), and a method per field reading that field alone
-(`__verald_load_<field>`), with which a wait reads only what its
-condition names.
+`#[modport]` generates `ModportRead` and, for a struct with no
+`#[output]` field, `InputOnly` over the types above; the testbench's
+runtime adds `ModportDrive`. See
+[modport-clocking-design.md](modport-clocking-design.md#typed-modports).
 
 ### Errors
 
