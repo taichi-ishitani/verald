@@ -78,7 +78,7 @@ impl Component for BusDriver {
     fn build(scope: &Scope, _context: BusContext) -> Result<Self, TestError> {
         Ok(BusDriver {
             port: SeqItemPort::new(),
-            cb: scope.clocking("clk")?,     // sampled and driven at `clk`
+            cb: scope.clocking()?,          // sampled and driven at its `#[clock]`
         })
     }
 
@@ -120,7 +120,7 @@ module regblock_test {
     initial {
         tb.set_clock("clk", clk);
         tb.set_reset("rst", rst);
-        tb.set_interface("bus", bus.master);
+        tb.set_modport("bus", bus.master);
         tb.start("RegTest");
         clk.start();                    // runs until the test ends
         rst.assert(clk);

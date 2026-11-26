@@ -1,5 +1,5 @@
 //! Parsing the fields of a signal struct (`#[input]`, `#[output]`,
-//! `#[modport]`) and the code shared by the structs generated over them:
+//! `#[modport]`, `#[clock]`, `#[reset]`) and the code shared by the structs generated over them:
 //! `#[modport]` here, `#[clocking]` in the testbench's macros.
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -15,6 +15,10 @@ pub enum Role {
     Input,
     Output,
     Modport,
+    /// The block's clock (`#[clock] clk: Clock`).
+    Clock,
+    /// The block's reset (`#[reset] rst: Reset`).
+    Reset,
 }
 
 pub struct FieldSpec {
@@ -80,6 +84,8 @@ fn take_role(field: &mut Field, roles: &[Role]) -> syn::Result<(Role, Option<Exp
             ("input", Role::Input),
             ("output", Role::Output),
             ("modport", Role::Modport),
+            ("clock", Role::Clock),
+            ("reset", Role::Reset),
         ]
         .into_iter()
         .find(|(name, role)| attr.path().is_ident(name) && roles.contains(role))
@@ -100,10 +106,20 @@ fn take_role(field: &mut Field, roles: &[Role]) -> syn::Result<(Role, Option<Exp
     }
     field.attrs = rest;
     let role = role.ok_or_else(|| {
-        let expected = if roles.contains(&Role::Modport) {
-            "`#[modport]`"
-        } else {
-            "`#[input]` or `#[output]`"
+        let names: Vec<&str> = roles
+            .iter()
+            .map(|role| match role {
+                Role::Input => "`#[input]`",
+                Role::Output => "`#[output]`",
+                Role::Modport => "`#[modport]`",
+                Role::Clock => "`#[clock]`",
+                Role::Reset => "`#[reset]`",
+            })
+            .collect();
+        let expected = match names.split_last() {
+            Some((last, [])) => last.to_string(),
+            Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+            None => String::new(),
         };
         syn::Error::new(field.span(), format!("the field needs {expected}"))
     })?;

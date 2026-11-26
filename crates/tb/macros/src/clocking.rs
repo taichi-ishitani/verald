@@ -19,8 +19,44 @@ use crate::runtime;
 pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<TokenStream2> {
     let mut item: ItemStruct = syn::parse2(item)?;
     check_plain(&attr, &item, "clocking")?;
-    let specs = take_fields(&mut item, &[Role::Input, Role::Output, Role::Modport])?;
+    let specs = take_fields(
+        &mut item,
+        &[
+            Role::Input,
+            Role::Output,
+            Role::Modport,
+            Role::Clock,
+            Role::Reset,
+        ],
+    )?;
     let name = item.ident.clone();
+    let clocks: Vec<&FieldSpec> = specs.iter().filter(|f| f.role == Role::Clock).collect();
+    let clock = match clocks.as_slice() {
+        [clock] => &clock.ident,
+        [] => {
+            return Err(syn::Error::new(
+                name.span(),
+                "a clocking block needs a `#[clock]` field: `#[clock] clk: Clock`",
+            ));
+        }
+        [_, second, ..] => {
+            return Err(syn::Error::new(
+                second.ident.span(),
+                "a clocking block has one `#[clock]` field",
+            ));
+        }
+    };
+    if let [_, second, ..] = specs
+        .iter()
+        .filter(|f| f.role == Role::Reset)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        return Err(syn::Error::new(
+            second.ident.span(),
+            "a clocking block has at most one `#[reset]` field",
+        ));
+    }
     let vis = item.vis.clone();
     let state = format_ident!("__VeraldClocking{}", name);
     push_hidden_field(&mut item, &state);
@@ -28,7 +64,10 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
 
     let rt = runtime();
     let ck = quote!(#rt::clocking);
-    let signals: Vec<&FieldSpec> = specs.iter().filter(|f| f.role != Role::Modport).collect();
+    let signals: Vec<&FieldSpec> = specs
+        .iter()
+        .filter(|f| matches!(f.role, Role::Input | Role::Output))
+        .collect();
     let state_fields = signals.iter().map(|f| {
         let (ident, ty) = (&f.ident, &f.ty);
         if f.role == Role::Input {
@@ -73,29 +112,32 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     });
     let binds = specs.iter().map(|f| {
         let (ident, ty) = (&f.ident, &f.ty);
-        if f.role == Role::Modport {
-            let path = path_of(f);
-            quote! {
+        let path = path_of(f);
+        match f.role {
+            Role::Modport => quote! {
                 #ident: <#ty as #ck::__private::ModportRead>::__bind(
-                    &#ck::__private::Signals::interface(signals, #path)?,
+                    &#ck::__private::Signals::modport(signals, #path)?,
                 )?
+            },
+            Role::Clock => quote!(#ident: #ck::Clocks::clock(signals, #path)?),
+            Role::Reset => quote!(#ident: #ck::Clocks::reset(signals, #path)?),
+            Role::Input | Role::Output => {
+                let local = format_ident!("__verald_v_{}", ident.unraw());
+                quote!(#ident: #local)
             }
-        } else {
-            let local = format_ident!("__verald_v_{}", ident.unraw());
-            quote!(#ident: #local)
         }
     });
     let paths_doc = format!(
-        "Paths the fields of [`{name}`] bind to, among the interfaces and signals \
-         the test module registered; a field left `None` binds to its own name. A \
-         signal's path may name an interface's member (`\"bus.done\"`)."
+        "Paths the fields of [`{name}`] bind to, among the clocks, resets, interfaces \
+         and signals the test module registered; a field left `None` binds to its own \
+         name. A path may name an interface's member (`\"bus.done\"`, `\"bus.clk\"`)."
     );
     let loads = specs.iter().filter_map(|f| {
         let ident = &f.ident;
         match f.role {
             Role::Modport => Some(quote!(#ck::__private::ModportRead::__load(&mut self.#ident);)),
             Role::Input => Some(quote!(self.#ident = self.#hidden.#ident.read();)),
-            Role::Output => None,
+            Role::Output | Role::Clock | Role::Reset => None,
         }
     });
     let stores = specs.iter().filter_map(|f| {
@@ -103,7 +145,7 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
         match f.role {
             Role::Modport => Some(quote!(#ck::ModportDrive::__store(&mut self.#ident);)),
             Role::Output => Some(quote!(self.#hidden.#ident.store(&self.#ident);)),
-            Role::Input => None,
+            Role::Input | Role::Clock | Role::Reset => None,
         }
     });
     let load_methods = specs.iter().map(|f| {
@@ -112,7 +154,7 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
         let body = match f.role {
             Role::Modport => quote!(#ck::__private::ModportRead::__load(&mut self.#ident);),
             Role::Input => quote!(self.#ident = self.#hidden.#ident.read();),
-            Role::Output => quote!(),
+            Role::Output | Role::Clock | Role::Reset => quote!(),
         };
         quote! {
             #[doc(hidden)]
@@ -130,7 +172,6 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
         #[allow(non_camel_case_types)]
         #[derive(Debug)]
         struct #state {
-            clock: #ck::__private::Clock,
             #(#state_fields,)*
         }
 
@@ -143,18 +184,17 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
         }
 
         impl #name {
-            /// Binds the fields among the interfaces and signals `signals`
-            /// holds, at the paths `paths` gives or their own names, to be
-            /// synchronized with the edges of `clock`. Fails if a signal is
-            /// missing, has the wrong direction or does not fit its field's
-            /// type.
+            /// Binds the fields among the clocks, resets, interfaces and
+            /// signals `signals` holds, at the paths `paths` gives or their
+            /// own names; the block is synchronized with the edges of its
+            /// `#[clock]` field. Fails if a signal is missing, has the wrong
+            /// direction or does not fit its field's type.
             #vis fn new(
-                signals: &(impl #ck::__private::Signals + ?::core::marker::Sized),
-                clock: #ck::__private::Clock,
+                signals: &(impl #ck::Clocks + ?::core::marker::Sized),
                 paths: #paths<'_>,
             ) -> ::core::result::Result<Self, #ck::__private::TestError> {
                 #[allow(unused_mut)]
-                let mut members = #state { clock, #(#member_binds,)* };
+                let mut members = #state { #(#member_binds,)* };
                 #(#signal_initials)*
                 ::core::result::Result::Ok(Self {
                     #(#binds,)*
@@ -175,7 +215,7 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
 
             /// The clock the block is synchronized with.
             #vis fn clock(&self) -> #ck::__private::Clock {
-                self.#hidden.clock
+                self.#clock
             }
 
             /// Drives the outputs changed since the last tick, waits for the
@@ -253,30 +293,28 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
         impl #ck::Clocking for #name {
             type Paths<'a> = #paths<'a>;
 
-            fn bind<S: #ck::__private::Signals + ?::core::marker::Sized>(
+            fn bind<S: #ck::Clocks + ?::core::marker::Sized>(
                 signals: &S,
-                clock: #ck::__private::Clock,
                 paths: #paths<'_>,
             ) -> ::core::result::Result<Self, #ck::__private::TestError> {
-                Self::new(signals, clock, paths)
+                Self::new(signals, paths)
             }
         }
 
         impl<'a> #ck::ClockingPaths for #paths<'a> {
             type Block = #name;
 
-            fn bind<S: #ck::__private::Signals + ?::core::marker::Sized>(
+            fn bind<S: #ck::Clocks + ?::core::marker::Sized>(
                 self,
                 signals: &S,
-                clock: #ck::__private::Clock,
             ) -> ::core::result::Result<#name, #ck::__private::TestError> {
-                #name::new(signals, clock, self)
+                #name::new(signals, self)
             }
         }
 
         impl #ck::ClockingBlock for #name {
             fn __clock(&self) -> #ck::__private::Clock {
-                self.#hidden.clock
+                self.#clock
             }
 
             fn __load(&mut self) {

@@ -37,6 +37,8 @@ struct Values {
 
 #[clocking]
 struct Cb {
+    #[clock]
+    clk: Clock,
     #[modport]
     bus: Values,
 }
@@ -53,7 +55,7 @@ struct Tests;
 
 impl Testbench for Tests {
     fn start(start: &mut Start) -> Result<(), TestError> {
-        let mut cb = start.clocking::<Cb>("clk")?;
+        let mut cb = start.clocking::<Cb>()?;
         start.main("test", async move {
             tick!(cb);
             let bus = &cb.bus;
@@ -120,7 +122,7 @@ fn setup(four_state: bool) -> (MockSim, Tb) {
         .map(|((n, dir), dims)| (n, dir, &dims[..]))
         .collect();
     let bus = sim.modport_ref("bus", "values_if", "tb", &members);
-    sim.call(&mut tb, "set_interface", &[str("bus"), bus])
+    sim.call(&mut tb, "set_modport", &[str("bus"), bus])
         .unwrap();
     sim.call(&mut tb, "start", &[str("values")]).unwrap();
     (sim, tb)

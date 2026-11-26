@@ -62,14 +62,14 @@
 
 ## Instance paths
 
-The names registered with `set_clock`, `set_reset`, `set_interface`,
+The names registered with `set_clock`, `set_reset`, `set_modport`,
 `set_input` and `set_output` are read as a hierarchy: a registered name
 `a.b.c` is the member `c` of the instance `a.b`.
 
 ```veryl
 tb.set_clock("dut.i_clk", clk);
 tb.set_reset("dut.i_rst", rst);
-tb.set_interface("dut.bus", bus.monitor);
+tb.set_modport("dut.bus", bus.monitor);
 ```
 
 Here `dut` is an instance with the members `i_clk`, `i_rst` and `bus`.

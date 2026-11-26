@@ -1,8 +1,8 @@
 //! A testbench on the runtime alone: drives additions through the adder's
 //! bus with a clocking block and checks the sums.
 
-use verald_tb_runtime::prelude::*;
 use verald_tb_runtime::host;
+use verald_tb_runtime::prelude::*;
 
 /// The `tb` modport of `adder_if`, as values.
 #[modport]
@@ -23,6 +23,8 @@ struct AdderBus {
 /// and the count of additions outside the bus.
 #[clocking]
 struct AdderCb {
+    #[clock]
+    clk: Clock,
     #[modport]
     bus: AdderBus,
     #[input]
@@ -49,7 +51,7 @@ impl Testbench for Adder {
             .as_u64()
             .map_err(|e| TestError::new(e.to_string()))?;
         let rst = start.reset("rst")?;
-        let mut cb = start.clocking::<AdderCb>("clk")?;
+        let mut cb = start.clocking::<AdderCb>()?;
         start.main("test", async move {
             // Wait out the reset, with the bus idle meanwhile.
             cb.init();

@@ -22,7 +22,7 @@ adder's test on Verilator.
 
 A testbench touches the simulator only through the component SDK
 (`veryl-component`): its hooks (`on_init`, `on_clock`, `on_reset`,
-`on_finish`), its methods (`set_clock`, `set_interface`, `set`, `start`,
+`on_finish`), its methods (`set_clock`, `set_modport`, `set`, `start`,
 ..), and the host's services behind `SimCtx` (reading and writing ports
 and modport members, time, logging, failing, finishing, the seed). Running
 on another simulator is a second host behind the same API: the testbench's
@@ -119,8 +119,8 @@ end
     a single signal, and the layout they are packed with; and the clocks,
     each with its reset.
 - The names the testbench looks up (`"bus"`) are bound to keys by the
-  wrapper's registration calls (`verald_set_interface("bus", 0)`), as the
-  test module's `tb.set_interface("bus", bus.master)` binds them today;
+  wrapper's registration calls (`verald_set_modport("bus", 0)`), as the
+  test module's `tb.set_modport("bus", bus.master)` binds them today;
   the table describes packing only.
 - `verald_drive` returns 1 when the testbench wrote any output of the entry
   since the last call; the wrapper then updates all of the entry's
@@ -248,7 +248,7 @@ All are non-`context` functions that return at once.
 |---|---|
 | `verald_init(label, table, seed, vector_width)` | loads the table, takes the seed and the vectors' width (`VERALD_MAX_W`); creates the testbench and calls `on_init` |
 | `verald_set_clock(name, key)`, `verald_set_reset(name, key)` | binds a name the testbench looks up to a clock or a reset |
-| `verald_set_interface(name, key)`, `verald_set_input(name, key)`, `verald_set_output(name, key)` | binds a name to a `signal_map` entry |
+| `verald_set_modport(name, key)`, `verald_set_input(name, key)`, `verald_set_output(name, key)` | binds a name to a `signal_map` entry |
 | `verald_set(key, value)`, `verald_option(key, value)` | the test's settings and the framework's options |
 | `verald_start(test, time)` | starts the test; not zero if it could not (no such test, a failed build) |
 | `verald_sample(key, in)` | a `signal_map` entry's inputs, before the hook |

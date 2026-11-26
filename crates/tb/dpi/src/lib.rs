@@ -718,7 +718,7 @@ pub fn set_clock_or_reset(method: &str, name: *const c_char, key: i32) -> i32 {
     })
 }
 
-/// `verald_set_interface` / `verald_set_input` / `verald_set_output`: binds `name`
+/// `verald_set_modport` / `verald_set_input` / `verald_set_output`: binds `name`
 /// to a `signal_map` entry of the table.
 pub fn set_signal_map(method: &str, name: *const c_char, key: i32) -> i32 {
     guard(1, || {
@@ -913,8 +913,8 @@ macro_rules! export {
         }
 
         #[unsafe(no_mangle)]
-        pub extern "C" fn verald_set_interface(name: *const ::std::ffi::c_char, key: i32) -> i32 {
-            $crate::set_signal_map("set_interface", name, key)
+        pub extern "C" fn verald_set_modport(name: *const ::std::ffi::c_char, key: i32) -> i32 {
+            $crate::set_signal_map("set_modport", name, key)
         }
 
         #[unsafe(no_mangle)]

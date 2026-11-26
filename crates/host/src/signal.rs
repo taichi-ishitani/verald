@@ -215,10 +215,10 @@ impl MemberSource for ModportRef {
 /// by the implementer: the runtime's registrations (`Start`, the
 /// methodology's `Scope`), later an instance's ports and observed signals.
 pub trait Signals {
-    /// What an interface's name resolves to.
+    /// What a modport's name resolves to.
     type Members: MemberSource;
-    /// The interface registered as `name`.
-    fn interface(&self, name: &str) -> Result<Self::Members, HostError>;
+    /// The modport registered as `name`.
+    fn modport(&self, name: &str) -> Result<Self::Members, HostError>;
     /// The signal read at `path`: a signal of its own, or an interface's
     /// member (`"bus.done"`).
     fn input(&self, path: &str) -> Result<InputPort, HostError>;

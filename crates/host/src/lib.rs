@@ -2,11 +2,17 @@
 //! by the layers built on it (the runtime, and later the assertions). See
 //! `docs/host-layer-design.md`.
 //!
+//! The layer also keeps the test module's registrations (`registry`) and
+//! its `start`, which closes them, and generates a component over its
+//! subscribers (`component!`).
+//!
 //! Signals are read and written only within a hook, with clocking-block
 //! semantics: a read returns the value before the edge, a write reaches the
 //! design at the edge. The `SimCtx` of the hook being run is published here
 //! for its duration.
 
+mod component;
+mod registry;
 mod signal;
 
 use std::cell::{Cell, RefCell};
@@ -17,9 +23,18 @@ pub use veryl_component::{
     ResetPort, RuntimeArg, SimCtx, Value,
 };
 
+pub use registry::Registered;
 pub use signal::{
     InputOnly, InputSignal, MemberSource, ModportRead, OutputSignal, SignalValue, Signals,
 };
+
+/// The test module's registrations, closed by `start`.
+pub mod registrations {
+    pub use super::registry::{
+        Registered, clock, clocks, input, modport, output, reset, resets, set_clock, set_input,
+        set_modport, set_output, set_reset, started,
+    };
+}
 
 /// A layer the hooks are dispatched to: the runtime, later the assertions.
 ///
@@ -35,6 +50,12 @@ pub trait HookSubscriber: Default {
     }
     /// At the start of a simulation.
     fn on_init(&mut self) -> Result<(), HostError> {
+        Ok(())
+    }
+    /// At the test module's `start`: the registrations are complete.
+    /// `test` is the test's name where the component takes one (with the
+    /// testbench), `None` otherwise.
+    fn on_start(&mut self, _test: Option<&str>) -> Result<(), HostError> {
         Ok(())
     }
     /// At an edge of a clock the component listens to; `fired` tells which.
@@ -100,7 +121,7 @@ pub mod entry {
         dispatch: impl FnOnce(&mut BuildCtx) -> Result<(), HostError>,
     ) -> veryl_component::Result<()> {
         build(ctx);
-        dispatch(ctx).map_err(to_host_api)
+        dispatch(ctx).map_err(failure)
     }
 
     pub fn on_init(
@@ -140,6 +161,27 @@ pub mod entry {
         update();
         let result = dispatch();
         leave();
+        result.map_err(failure)
+    }
+
+    /// The test module's `start`: closes the registrations, then calls the
+    /// subscribers' `on_start` within the hook's frame.
+    pub fn start(
+        ctx: &mut SimCtx,
+        test: Option<&str>,
+        dispatch: impl FnOnce(Option<&str>) -> Result<(), HostError>,
+    ) -> veryl_component::Result<()> {
+        registry::close().map_err(to_host_api)?;
+        let Some(_guard) = enter(ctx) else {
+            return Ok(());
+        };
+        let result = dispatch(test);
+        leave();
+        result.map_err(failure)
+    }
+
+    /// A registration method's result, as the host API's.
+    pub fn register(result: Result<(), HostError>) -> veryl_component::Result<()> {
         result.map_err(to_host_api)
     }
 
@@ -152,7 +194,14 @@ pub mod entry {
         if guard.is_some() {
             leave();
         }
-        result.map_err(to_host_api)
+        result.map_err(failure)
+    }
+
+    /// A subscriber's error: recorded as a failure, then returned to the
+    /// host.
+    fn failure(error: HostError) -> veryl_component::Error {
+        FAILED.set(true);
+        to_host_api(error)
     }
 }
 
@@ -168,6 +217,9 @@ thread_local! {
     /// Set once a hook has unwound: the component is in an unknown state,
     /// and every later hook returns at once.
     static POISONED: Cell<bool> = const { Cell::new(false) };
+    /// Whether the simulation has failed: `fail` called, or a subscriber's
+    /// error returned from a hook.
+    static FAILED: Cell<bool> = const { Cell::new(false) };
     /// Whether the simulation is four-state, taken at `on_init`.
     static FOUR_STATE: Cell<bool> = const { Cell::new(false) };
     /// The runtime arguments, taken at `create`.
@@ -195,7 +247,9 @@ pub fn seed() -> u64 {
 fn init() {
     IN_HOOK.set(false);
     POISONED.set(false);
+    FAILED.set(false);
     RESETS.with(|r| r.borrow_mut().clear());
+    registry::init();
 }
 
 /// Every runtime argument as given (`--runtime-arg`), in order, overridden
@@ -417,7 +471,14 @@ pub fn finish() {
 
 /// Fails the test.
 pub fn fail(message: &str) {
+    FAILED.set(true);
     with_ctx(|ctx| ctx.fail(message));
+}
+
+/// Whether the simulation has failed: `fail` called, or a subscriber's
+/// error returned from a hook. A finish it caused is expected.
+pub fn failed() -> bool {
+    FAILED.get()
 }
 
 /// Whether `port` is the clock or reset that fired the current hook.

@@ -56,7 +56,7 @@ module top;
             $fatal(1, "verald: verald_init failed");
         if (verald_set_clock("clk", CLK) != 0) $fatal(1, "verald: set_clock failed");
         if (verald_set_reset("rst", RST) != 0) $fatal(1, "verald: set_reset failed");
-        if (verald_set_interface("bus", BUS) != 0) $fatal(1, "verald: set_interface failed");
+        if (verald_set_modport("bus", BUS) != 0) $fatal(1, "verald: set_modport failed");
         if (verald_set_input("count", COUNT) != 0) $fatal(1, "verald: set_input failed");
         if (verald_option("timeout", 100000) != 0) $fatal(1, "verald: option failed");
         if (verald_set("count", 20) != 0) $fatal(1, "verald: set failed");

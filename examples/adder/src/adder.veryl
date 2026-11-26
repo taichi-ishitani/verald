@@ -64,7 +64,7 @@ module adder_test {
     initial {
         tb.set_clock("clk", clk);
         tb.set_reset("rst", rst);
-        tb.set_interface("bus", bus.tb);
+        tb.set_modport("bus", bus.tb);
         tb.set_input("count", count);
         tb.option("timeout", 1000);
         tb.set("count", 20);

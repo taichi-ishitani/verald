@@ -1,6 +1,6 @@
 # Modports and clocking blocks: design
 
-> **Status:** implemented, except where marked *to change*. Typed modports
+> **Status:** implemented. Typed modports
 > (`#[modport]`, shared by the testbench and the assertions) and clocking
 > blocks (`#[clocking]`, the testbench's), gathered from
 > [design.md](design.md), [host-layer-design.md](host-layer-design.md) and
@@ -61,24 +61,21 @@ users see follows rustdv-veryl's clocking blocks:
   `#[output]` (driven) signals, and `#[modport]` fields, structs declaring a
   modport's members the same way. A signal need not belong to an interface
   (an interrupt, for example).
-- `Cb::new(signals, clock, CbPaths::default())` binds each field by its name
-  among what the test module registered: an interface (`set_interface`) for
-  a modport field, whose members bind by their names; a signal registered
-  with `set_input` / `set_output`, or an interface's member by a dotted path
-  (`"bus.done"`), for a signal field. The generated `<Name>Paths` struct
-  overrides the path of any field. `signals` is anything implementing
-  `Signals`: `Start` now, the methodology's `Scope` later. `Signals` also
-  gives the short forms `scope.clocking::<Cb>("clk")?` (every field at its
-  own name, the clock by its registered name) and
-  `scope.clocking_with("clk", CbPaths { .. })?` (the block's type following
-  from its paths' type); `new` remains for a clock given as a `Clock`.
-  Widths are checked
-  against the fields' types at construction. Clocking stays on the
-  component's side, not in Veryl (see
-  [veryl-proposals.md](veryl-proposals.md#clocking-blocks-as-a-language-feature-a-study)),
-  so the clock is given here.
-- **To change**: the clock becomes a field (see
-  [Clock and reset as fields](#clock-and-reset-as-fields)).
+- `Cb::new(signals, CbPaths::default())` binds each field by its name
+  among what the test module registered: the clock (`set_clock`) for the
+  `#[clock]` field and the reset (`set_reset`) for a `#[reset]` one (see
+  [Clock and reset as fields](#clock-and-reset-as-fields)); an interface
+  (`set_modport`) for a modport field, whose members bind by their
+  names; a signal registered with `set_input` / `set_output`, or an
+  interface's member by a dotted path (`"bus.done"`), for a signal field.
+  The generated `<Name>Paths` struct overrides the path of any field.
+  `signals` is anything implementing the runtime's `Clocks`: `Start`, and
+  the methodology's `Scope`. `Clocks` also gives the short forms
+  `scope.clocking::<Cb>()?` (every field at its own name) and
+  `scope.clocking_with(CbPaths { .. })?` (the block's type following from
+  its paths' type). Widths are checked against the fields' types at
+  construction. Clocking stays on the component's side, not in Veryl (see
+  [veryl-proposals.md](veryl-proposals.md#clocking-blocks-as-a-language-feature-a-study)).
 - Field types implement `SignalValue`: `bool`, the unsigned integers up to
   `u128` and `BigUint` (any width). Signals are two-state: X and Z read as
   0, as SystemVerilog's conversion to two-state types, and each type reads
@@ -112,9 +109,6 @@ users see follows rustdv-veryl's clocking blocks:
   (dropping it, with what it forked), and starts over.
 
 ## Clock and reset as fields
-
-> **To change** for clocking blocks (decided with the assertions, not
-> implemented); assertion blocks are designed this way from the start.
 
 The clock and the reset are fields marked `#[clock]` and `#[reset]`, in
 clocking blocks and assertion blocks alike:

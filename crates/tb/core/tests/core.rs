@@ -112,7 +112,7 @@ impl Component for Broken {
     type Context = ();
 
     fn build(scope: &Scope, (): ()) -> Result<Self, TestError> {
-        scope.interface("missing")?;
+        scope.modport("missing")?;
         Ok(Broken)
     }
 }
@@ -345,7 +345,7 @@ fn a_build_error_names_the_component_being_built() {
     assert!(
         error
             .to_string()
-            .contains("building `env.broken`: no interface is registered as `missing`"),
+            .contains("building `env.broken`: no modport is registered as `missing`"),
         "{error}"
     );
 }

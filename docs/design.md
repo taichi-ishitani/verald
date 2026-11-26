@@ -288,7 +288,7 @@ Decided:
 
   Behaviour a value cannot express stays with callbacks.
 - Interfaces are found by path: the Veryl test module
-  registers each under a path (`tb.set_interface("apb", apb.master)`), the
+  registers each under a path (`tb.set_modport("apb", apb.master)`), the
   configuration holds that path as a string, and the component that drives or
   watches the bus (the driver, the monitor) looks the interface up by it in
   the interface registry, typed, failing at construction if the path is
@@ -304,7 +304,7 @@ Decided:
   }
 
   // the driver's build
-  let bus: ApbMasterMP = scope.interface(&context.config().driver_if)?;
+  let bus: ApbMasterMP = scope.modport(&context.config().driver_if)?;
   ```
 
 - Random stability follows UVM. Every component has its own random
@@ -1241,7 +1241,7 @@ Decided and implemented: a `#[clocking]` struct is a clocking block, as
 SystemVerilog's `clocking cb @(posedge clk)`, over `#[input]` and
 `#[output]` signals and `#[modport]` fields, bound by name among the test
 module's registrations, with `tick`, the waits and `run_with_reset`. The
-clock is to become a field (`#[clock]`), as in assertion blocks. See
+clock is a field (`#[clock]`), as in assertion blocks. See
 [modport-clocking-design.md](modport-clocking-design.md).
 
 ### Concurrency within a component
@@ -1582,8 +1582,8 @@ Decided:
   - To check when implemented: the width an unsized literal (`200000`) is
     passed with; values beyond 32 bits may need a sized literal (`64'd..`).
   - Every value from the design, a bus's width included, comes through
-    `set`, so that values have one source rather than several. An interface
-    found with `scope.interface(..)` is not read for values.
+    `set`, so that values have one source rather than several. A modport
+    found with `scope.modport(..)` is not read for values.
   - Values are assigned on the Veryl side, so Veryl is their source; one
     value per `set` is the way until Veryl can hand its types to Rust (see
     [TODO](#todo)).

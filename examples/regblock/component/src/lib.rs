@@ -85,6 +85,8 @@ pub struct BusMaster {
 
 #[clocking]
 pub struct DriverCb {
+    #[clock]
+    clk: Clock,
     #[modport]
     bus: BusMaster,
 }
@@ -110,6 +112,8 @@ pub struct BusWatch {
 
 #[clocking]
 pub struct MonitorCb {
+    #[clock]
+    clk: Clock,
     #[modport]
     bus: BusWatch,
 }
@@ -130,13 +134,10 @@ impl Component for BusDriver {
     type Context = BusContext;
 
     fn build(scope: &Scope, context: BusContext) -> Result<Self, TestError> {
-        let cb = scope.clocking_with(
-            "clk",
-            DriverCbPaths {
-                bus: Some(context.config().driver_if),
-                ..Default::default()
-            },
-        )?;
+        let cb = scope.clocking_with(DriverCbPaths {
+            bus: Some(context.config().driver_if),
+            ..Default::default()
+        })?;
         Ok(BusDriver {
             rst: scope.reset("rst")?,
             context,
@@ -204,13 +205,10 @@ impl Component for BusMonitor {
     type Context = BusContext;
 
     fn build(scope: &Scope, context: BusContext) -> Result<Self, TestError> {
-        let cb = scope.clocking_with(
-            "clk",
-            MonitorCbPaths {
-                bus: Some(context.config().monitor_if),
-                ..Default::default()
-            },
-        )?;
+        let cb = scope.clocking_with(MonitorCbPaths {
+            bus: Some(context.config().monitor_if),
+            ..Default::default()
+        })?;
         Ok(BusMonitor {
             context,
             port: AnalysisPort::new(),

@@ -1,9 +1,10 @@
 # Host layer: design
 
 > **Status:** implemented as the crate `verald-host`, with the runtime
-> as its one subscriber; what the assertions will need of it (several
-> subscribers in `export!`, the registrations and the start in the layer,
-> failures recorded, later probes) is not yet. It records how the code that
+> as its one subscriber so far: the registrations and the start, failures
+> recorded, and a component over a list of subscribers (`component!`) are
+> the layer's; `verald::export!` taking assertions waits for them, and
+> probes for changes to Veryl. It records how the code that
 > talks to Veryl's host API was separated from the runtime, so that layers
 > other than the testbench (assertions first) share it.
 
@@ -271,7 +272,7 @@ pub trait MemberSource {
 /// Where names bind: resolution to ports only.
 pub trait Signals {
     type Members: MemberSource;
-    fn interface(&self, name: &str) -> Result<Self::Members, HostError>;
+    fn modport(&self, name: &str) -> Result<Self::Members, HostError>;
     fn input(&self, path: &str) -> Result<InputPort, HostError>;
     fn output(&self, path: &str) -> Result<OutputPort, HostError>;
     fn clock_port(&self, name: &str) -> Result<ClockPort, HostError>;
@@ -311,11 +312,12 @@ The test module names the signals the layers above bind to, then starts
 the component. Both are the layer's, so that a component without the
 testbench has them too:
 
-- **The registrations**: `set_clock`, `set_reset`, `set_interface`,
-  `set_input`, `set_output`, a table of names to ports. A name is
-  registered once; an interface's clock and reset members are registered
-  as `<name>.<member>`; a registered reset is tracked (`track_reset`).
-  `Registered` implements `Signals` over the table.
+- **The registrations** (`registrations`): `set_clock`, `set_reset`,
+  `set_modport`, `set_input`, `set_output`, a table of names to ports,
+  in the order registered. A name is registered once; an interface's
+  clock and reset members are registered as `<name>.<member>`; a
+  registered reset is tracked (`track_reset`). `Registered` implements
+  `Signals` over the table. The table is made afresh at `on_init`.
 - **The start**: the test module's `start` ends the registrations (one
   after it is an error) and calls `on_start` of every subscriber, in
   order: the assertions bind their blocks, the runtime starts its test.
@@ -327,22 +329,36 @@ What a name means beyond a port stays above: the runtime builds its
 
 ## Exporting a component
 
-`component!` / `export!` are wired to the runtime's `host` today. They are
-to generate the layer's entry over a list of subscribers:
+The layer's `component!` defines a component over a list of
+subscribers, and the methods a layer adds:
 
 ```rust
-verald::export!("tb", testbench = Methodology, assertions = [BusSva, FifoSva]);
-verald::export!("sva", assertions = [BusSva, FifoSva]);
+verald_host::component! {
+    pub struct Sva { assertions: MyAssertions }
+
+    fn start(&mut self, ctx: &mut ::veryl_component::SimCtx) -> ::veryl_component::Result<()> {
+        verald_host::entry::start(ctx, None, |test| self.__verald_on_start(test))
+    }
+}
 ```
 
 - The component struct holds one field per subscriber; each hook enters the
-  context and calls them in order, the assertions before the testbench.
-- The registration methods and `start` are the layer's and generated for
-  every component. The testbench's own methods (`set_master_clock`,
-  `option`, `set`) are generated only when the testbench is among the
-  subscribers; they forward to it.
-- An assertions-only component (a DUT with `$tb::clock_gen` and no
-  testbench) is exported without the runtime.
+  context and calls them in order (`on_finish` calls every one, returning
+  the first error).
+- The registration methods are the layer's and generated for every
+  component. `start` is given by the caller, which knows whether it takes
+  a test's name; it goes through `entry::start`, which closes the
+  registrations and calls the subscribers' `on_start`.
+- The runtime's `component!` / `export!` are this with the runtime as the
+  subscriber and the testbench's own methods (`start(test)`,
+  `set_master_clock`, `option`, `set`).
+- With the assertions, `verald::export!` takes them, before the
+  testbench, or alone (a DUT with `$tb::clock_gen` and no testbench):
+
+  ```rust
+  verald::export!("tb", testbench = Methodology, assertions = [BusSva, FifoSva]);
+  verald::export!("sva", assertions = [BusSva, FifoSva]);
+  ```
 
 ## What stays in the layers above
 
@@ -359,13 +375,14 @@ verald::export!("sva", assertions = [BusSva, FifoSva]);
   pub trait Clocks: Signals {
       fn clock(&self, name: &str) -> Result<Clock, TestError>;
       fn reset(&self, name: &str) -> Result<Reset, TestError>;
-      fn clocking<C: Clocking>(&self, clock: &str) -> Result<C, TestError> { .. }
-      fn clocking_with<P: ClockingPaths>(&self, clock: &str, paths: P)
+      fn clocking<C: Clocking>(&self) -> Result<C, TestError> { .. }
+      fn clocking_with<P: ClockingPaths>(&self, paths: P)
           -> Result<P::Block, TestError> { .. }
   }
   ```
 
-  The prelude exports it, so `scope.clocking::<C>("clk")` reads as today;
+  The prelude exports it, so `scope.clocking::<C>()` reads as a method of
+  the scope;
 - clocking: `Driven<T>` (writing only what changed), `tick`, the waits,
   `drive`;
 - the lifecycle (setup, running, ended), the timeout, unexpected finishes
@@ -412,16 +429,27 @@ Changes the steps made to the public API: `Signals` returns ports only and
 layer's) and `Value` fields are gone; the runtime arguments can be read
 from `create` on, not only after `start`.
 
-Still to do before the proof of concept, in the same way:
+Then, before the proof of concept, in the same way:
 
 7. The registrations' table and `Registered` moved to the layer, the
-   runtime's `Clock` and `Reset` built over it; `start` and `on_start`.
+   runtime's `Clock` and `Reset` built over it at `on_start`; `start`
+   closing the registrations and calling `on_start`.
 8. `failed()`, and the runtime's unexpected finish skipped after a failure.
-9. `export!` over a list of subscribers, the runtime one of them; a
-   component without it.
+9. `component!` over a list of subscribers, the runtime's built on it; a
+   component without the runtime (tested with subscribers of the test's
+   own). `verald::export!` taking assertions comes with them.
 
 ## Deferred items
 
+- **Thread-local access on the per-edge path**, to be measured once the
+  assertions read every field at every edge. A component is a `cdylib`,
+  so each thread-local access goes through `__tls_get_addr`; a signal read
+  takes two (`CTX`, `FOUR_STATE`) before the one load of the direct read,
+  and each hook's frame about six. The registrations and `FAILED` are off
+  that path. Remedies, in order: one thread-local for the hook's context
+  and the four-state flag; an `InputSignal` reading the port's pointer
+  itself where the run is two-state (needs the SDK to expose it); the
+  runtime's state borrowed once per edge.
 - Probes and enumerating instances (changes to Veryl; see
   [assertion-design.md](assertion-design.md#changes-to-veryl)).
 - Staging only the inputs bound to the event that fired: today every input

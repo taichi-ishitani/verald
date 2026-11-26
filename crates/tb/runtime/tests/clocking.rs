@@ -23,6 +23,8 @@ struct Bus {
 
 #[clocking]
 struct Cb {
+    #[clock]
+    clk: Clock,
     #[modport]
     bus: Bus,
 }
@@ -30,6 +32,8 @@ struct Cb {
 /// A clocking block over a modport and signals outside any interface.
 #[clocking]
 struct IrqCb {
+    #[clock]
+    clk: Clock,
     #[modport]
     bus: Bus,
     #[input]
@@ -68,6 +72,8 @@ struct InitBus {
 
 #[clocking]
 struct InitCb {
+    #[clock]
+    clk: Clock,
     #[modport]
     bus: InitBus,
     #[output(init = true)]
@@ -77,6 +83,8 @@ struct InitCb {
 /// A wide signal read whole.
 #[clocking]
 struct WideCb {
+    #[clock]
+    clk: Clock,
     #[input]
     wide: verald_tb_runtime::BigUint,
 }
@@ -89,8 +97,21 @@ struct NarrowBus {
 
 #[clocking]
 struct NarrowCb {
+    #[clock]
+    clk: Clock,
     #[modport]
     bus: NarrowBus,
+}
+
+/// A clock and a reset named otherwise than registered, mapped by paths.
+#[clocking]
+struct ResetCb {
+    #[clock]
+    main_clk: Clock,
+    #[reset]
+    main_rst: Reset,
+    #[modport]
+    bus: BusMonitor,
 }
 
 thread_local! {
@@ -112,7 +133,7 @@ impl Testbench for Tests {
         let clk = start.clock("clk")?;
         match start.test_name() {
             "drive_and_sample" => {
-                let mut cb = start.clocking::<Cb>("clk")?;
+                let mut cb = start.clocking::<Cb>()?;
                 start.main("test", async move {
                     cb.bus.start = true;
                     cb.bus.a = 5;
@@ -125,7 +146,7 @@ impl Testbench for Tests {
                 });
             }
             "posedge" => {
-                let mut cb = start.clocking::<Cb>("clk")?;
+                let mut cb = start.clocking::<Cb>()?;
                 start.main("test", async move {
                     posedge!(cb.bus.done);
                     log(format!(
@@ -137,14 +158,14 @@ impl Testbench for Tests {
                 });
             }
             "within" => {
-                let mut cb = start.clocking::<Cb>("clk")?;
+                let mut cb = start.clocking::<Cb>()?;
                 start.main("test", async move {
                     posedge_within!(cb.bus.done, 2)?;
                     Ok(())
                 });
             }
             "tick_until" => {
-                let mut cb = start.clocking::<Cb>("clk")?;
+                let mut cb = start.clocking::<Cb>()?;
                 start.main("test", async move {
                     tick_until!(cb.bus.result >= 3);
                     log(format!("at {}: {}", cb.clock().edges(), cb.bus.result));
@@ -152,14 +173,11 @@ impl Testbench for Tests {
                 });
             }
             "irq" => {
-                let mut cb = start.clocking_with(
-                    "clk",
-                    IrqCbPaths {
-                        irq: Some("interrupt"),
-                        done: Some("bus.done"),
-                        ..Default::default()
-                    },
-                )?;
+                let mut cb = start.clocking_with(IrqCbPaths {
+                    irq: Some("interrupt"),
+                    done: Some("bus.done"),
+                    ..Default::default()
+                })?;
                 start.main("test", async move {
                     posedge!(cb.irq);
                     log(format!(
@@ -174,7 +192,7 @@ impl Testbench for Tests {
                 });
             }
             "wide" => {
-                let mut cb = WideCb::new(start, clk, WideCbPaths::default())?;
+                let mut cb = WideCb::new(start, WideCbPaths::default())?;
                 start.main("test", async move {
                     tick!(cb);
                     log(format!("{:x}", cb.wide));
@@ -182,7 +200,7 @@ impl Testbench for Tests {
                 });
             }
             "init" => {
-                let mut cb = start.clocking::<InitCb>("clk")?;
+                let mut cb = start.clocking::<InitCb>()?;
                 start.main("test", async move {
                     log(format!("before init: a {} ack {}", cb.bus.a, cb.ack));
                     tick!(cb);
@@ -196,12 +214,12 @@ impl Testbench for Tests {
                 });
             }
             "narrow" => {
-                let _cb = NarrowCb::new(start, clk, NarrowCbPaths::default())?;
+                let _cb = NarrowCb::new(start, NarrowCbPaths::default())?;
                 start.main("test", async { Ok(()) });
             }
             "run_with_reset" => {
                 let rst = start.reset("rst")?;
-                let cb = start.clocking::<Cb>("clk")?;
+                let cb = start.clocking::<Cb>()?;
                 start.spawn("driver", async move {
                     let mut cb = cb;
                     let never: Result<Infallible, TestError> = run_with_reset(
@@ -227,6 +245,23 @@ impl Testbench for Tests {
                     clk.wait(4).await;
                     Ok(())
                 });
+            }
+            "clock_paths" => {
+                let cb = start.clocking_with(ResetCbPaths {
+                    main_clk: Some("clk"),
+                    main_rst: Some("rst"),
+                    ..Default::default()
+                })?;
+                log(format!(
+                    "clock {} reset {}",
+                    cb.clock().name(),
+                    cb.main_rst.name()
+                ));
+                start.main("test", async { Ok(()) });
+            }
+            "unmapped_clock" => {
+                start.clocking::<ResetCb>()?;
+                start.main("test", async { Ok(()) });
             }
             other => return Err(TestError::new(format!("no test `{other}`"))),
         }
@@ -261,7 +296,7 @@ fn setup() -> (MockSim, Tb) {
             ("result", RefDir::Input, &[9]),
         ],
     );
-    sim.call(&mut tb, "set_interface", &[str("bus"), bus])
+    sim.call(&mut tb, "set_modport", &[str("bus"), bus])
         .unwrap();
     let irq = sim.signal_ref("interrupt", false, &[1]);
     sim.call(&mut tb, "set_input", &[str("interrupt"), irq])
@@ -405,5 +440,22 @@ fn init_drives_the_declared_initial_values_at_once() {
     assert_eq!(
         take_log(),
         ["before init: a 3 ack true", "after init: a 3 ack true"]
+    );
+}
+
+#[test]
+fn a_clock_and_a_reset_bind_by_name_or_paths() {
+    let (mut sim, mut tb) = setup();
+    sim.call(&mut tb, "start", &[str("clock_paths")]).unwrap();
+    assert_eq!(take_log(), ["clock clk reset rst"]);
+    let (mut sim, mut tb) = setup();
+    let error = sim
+        .call(&mut tb, "start", &[str("unmapped_clock")])
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("no clock is registered as `main_clk`"),
+        "{error}"
     );
 }

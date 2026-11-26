@@ -89,10 +89,13 @@ fn expand(r: syn::Result<TokenStream2>) -> TokenStream {
     r.unwrap_or_else(syn::Error::into_compile_error).into()
 }
 
-/// Makes the struct a clocking block over its `#[modport]` fields.
-/// Generates `new(clock, <one ModportRef per modport field>)`, `tick`,
-/// `drive` and the waits `posedge`, `negedge`, `edge`, `changed`, `wait`,
-/// `tick_until` and `tick_while`.
+/// Makes the struct a clocking block over its fields: one `#[clock]`
+/// (`clk: Clock`), at most one `#[reset]` (`rst: Reset`), and `#[input]`,
+/// `#[output]` and `#[modport]` fields, each bound by its name among the
+/// test module's registrations. Generates `new(signals, paths)`, the
+/// `<Name>Paths` struct overriding where fields bind, `tick`, `drive` and
+/// the waits `posedge`, `negedge`, `edge`, `changed`, `wait`, `tick_until`
+/// and `tick_while`.
 #[proc_macro_attribute]
 pub fn clocking(attr: TokenStream, item: TokenStream) -> TokenStream {
     expand(clocking::clocking(attr.into(), item.into()))

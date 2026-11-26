@@ -86,8 +86,8 @@ module regblock_test {
     initial {
         tb.set_clock("clk", clk);               // registered under a name
         tb.set_reset("rst", rst);
-        tb.set_interface("bus", bus.master);    // the driver's side
-        tb.set_interface("bus_mon", bus.monitor);
+        tb.set_modport("bus", bus.master);    // the driver's side
+        tb.set_modport("bus_mon", bus.monitor);
         tb.start("BasicTest");                  // the test, by its registered name
         clk.start();                            // runs until the test ends
         rst.assert(clk);
@@ -237,7 +237,7 @@ no string-keyed database. A configuration, once made, is put in one with
 The driver and the monitor see the bus through clocking blocks. A
 `#[modport]` struct lists the members of a modport as fields: `#[input]`
 fields are sampled, `#[output]` fields are driven. A `#[clocking]` struct
-ties modports to a clock:
+ties modports to a clock, its `#[clock]` field:
 
 ```rust
 #[modport]
@@ -253,6 +253,7 @@ pub struct BusMaster {
 
 #[clocking]
 pub struct DriverCb {
+    #[clock]   clk: Clock,
     #[modport] bus: BusMaster,
 }
 ```
@@ -283,13 +284,10 @@ impl Component for BusDriver {
     type Context = BusContext;
 
     fn build(scope: &Scope, context: BusContext) -> Result<Self, TestError> {
-        let cb = scope.clocking_with(
-            "clk",
-            DriverCbPaths {
-                bus: Some(context.config().driver_if),
-                ..Default::default()
-            },
-        )?;
+        let cb = scope.clocking_with(DriverCbPaths {
+            bus: Some(context.config().driver_if),
+            ..Default::default()
+        })?;
         Ok(BusDriver {
             rst: scope.reset("rst")?,
             context,
@@ -313,9 +311,10 @@ impl Component for BusDriver {
 ```
 
 - `build` makes the component from what its parent gives (its `Context`).
-  `scope.clocking_with` binds the clocking block to the clock registered
-  as `"clk"`, and its `bus` modport to the interface the configuration
-  names; `scope.clocking("clk")` binds every field at its own name.
+  `scope.clocking_with` binds the clocking block's fields at their own
+  names (its clock `clk` to the clock registered as `"clk"`), except its
+  `bus` modport, bound to the interface the configuration names;
+  `scope.clocking()` binds every field at its own name.
 - The field markers say what the agent connects: `#[context]` gives the
   component `context()`, `#[seq_item_port]` the port to its sequencer.
 - `run` is the component's work during the run phase; every component's

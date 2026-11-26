@@ -3,7 +3,8 @@
 //! A `#[modport]` struct declares the members of an interface's modport as
 //! fields: `#[input]` fields are sampled, `#[output]` fields are driven. A
 //! `#[clocking]` struct holds modports and a clock, as SystemVerilog's
-//! `clocking cb @(posedge clk)`. `tick!(cb)` drives the outputs changed since
+//! `clocking cb @(posedge clk)`: a `#[clock]` field, bound by name as the
+//! other fields are. `tick!(cb)` drives the outputs changed since
 //! the last tick, waits for the clock's next edge, and samples the inputs.
 //!
 //! ```ignore
@@ -17,10 +18,11 @@
 //!
 //! #[clocking]
 //! struct AdderCb {
+//!     #[clock]   clk: Clock,
 //!     #[modport] bus: AdderBus,
 //! }
 //!
-//! let mut cb = start.clocking::<AdderCb>("clk")?;
+//! let mut cb = start.clocking::<AdderCb>()?;
 //! cb.bus.start = true;
 //! tick!(cb);
 //! posedge!(cb.bus.done);
@@ -98,10 +100,10 @@ impl<T: SignalValue> Driven<T> {
     }
 }
 
-/// Where a clocking block's clock binds, over the host layer's `Signals`:
-/// the clocks and resets the test module registered, as the runtime's
-/// `Clock` and `Reset`. `Start` implements it, and so does the
-/// methodology's `Scope`.
+/// Where a clocking block binds, over the host layer's `Signals`: the
+/// clocks and resets the test module registered, as the runtime's `Clock`
+/// and `Reset`. `Start` implements it, and so does the methodology's
+/// `Scope`.
 pub trait Clocks: Signals {
     /// The clock registered as `name` (an interface's clock member as
     /// `"bus.clk"`).
@@ -110,25 +112,23 @@ pub trait Clocks: Signals {
     /// `"bus.rst"`).
     fn reset(&self, name: &str) -> Result<Reset, TestError>;
 
-    /// Makes a clocking block following the clock registered as `clock`,
-    /// every field bound at its own name:
-    /// `scope.clocking::<AdderCb>("clk")?`.
-    fn clocking<C: Clocking>(&self, clock: &str) -> Result<C, TestError>
+    /// Makes a clocking block, every field (its clock among them) bound at
+    /// its own name: `scope.clocking::<AdderCb>()?`.
+    fn clocking<C: Clocking>(&self) -> Result<C, TestError>
     where
         Self: Sized,
     {
-        C::bind(self, Clocks::clock(self, clock)?, Default::default())
+        C::bind(self, Default::default())
     }
 
-    /// Makes a clocking block following the clock registered as `clock`,
-    /// with fields bound where `paths` says; the block's type follows from
-    /// the paths' type:
-    /// `scope.clocking_with("clk", AdderCbPaths { count: Some("cnt"), ..Default::default() })?`.
-    fn clocking_with<P: ClockingPaths>(&self, clock: &str, paths: P) -> Result<P::Block, TestError>
+    /// Makes a clocking block with fields bound where `paths` says; the
+    /// block's type follows from the paths' type:
+    /// `scope.clocking_with(AdderCbPaths { clk: Some("clk2"), ..Default::default() })?`.
+    fn clocking_with<P: ClockingPaths>(&self, paths: P) -> Result<P::Block, TestError>
     where
         Self: Sized,
     {
-        paths.bind(self, Clocks::clock(self, clock)?)
+        paths.bind(self)
     }
 }
 
@@ -137,11 +137,7 @@ pub trait Clocking: Sized {
     /// The struct overriding where its fields bind (`<Name>Paths`).
     type Paths<'a>: Default;
     /// Binds the block, as its `new` does.
-    fn bind<S: Signals + ?Sized>(
-        signals: &S,
-        clock: Clock,
-        paths: Self::Paths<'_>,
-    ) -> Result<Self, TestError>;
+    fn bind<S: Clocks + ?Sized>(signals: &S, paths: Self::Paths<'_>) -> Result<Self, TestError>;
 }
 
 /// The paths struct of a clocking block (`<Name>Paths`), which knows its
@@ -149,8 +145,7 @@ pub trait Clocking: Sized {
 pub trait ClockingPaths {
     type Block;
     /// Binds the block at these paths.
-    fn bind<S: Signals + ?Sized>(self, signals: &S, clock: Clock)
-    -> Result<Self::Block, TestError>;
+    fn bind<S: Clocks + ?Sized>(self, signals: &S) -> Result<Self::Block, TestError>;
 }
 
 /// Implemented by `#[modport]` for its struct: driving the outputs, on top

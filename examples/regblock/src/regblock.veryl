@@ -95,8 +95,8 @@ module regblock_test {
     initial {
         tb.set_clock("clk", clk);
         tb.set_reset("rst", rst);
-        tb.set_interface("bus", bus.master);
-        tb.set_interface("bus_mon", bus.monitor);
+        tb.set_modport("bus", bus.master);
+        tb.set_modport("bus_mon", bus.monitor);
         tb.start("BasicTest");
         clk.start();
         rst.assert(clk);

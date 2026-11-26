@@ -62,75 +62,30 @@ pub mod __private {
 /// without exporting it: [`export!`] does both. Useful on its own to drive
 /// the component from `veryl_component::testing` in unit tests.
 ///
+/// The component is the host layer's (`host::component!`) with the runtime
+/// as its subscriber, and the testbench's own methods: `start(test)`,
+/// `set_master_clock`, `option` and `set`.
+///
 /// The crate must depend on `veryl-component` directly: its derives name
 /// `::veryl_component`.
 #[macro_export]
 macro_rules! component {
     ($vis:vis $ty:ident, $tb:ty) => {
-        /// The Verald testbench: the test module registers clocks,
-        /// resets and interfaces, gives options and settings, then starts
-        /// a test.
-        #[derive(::veryl_component::Component)]
-        #[component(kind = clocked)]
-        $vis struct $ty {
-            runtime: $crate::testbench::Runtime<$tb>,
-        }
+        $crate::host::component! {
+            /// The Verald testbench: the test module registers clocks,
+            /// resets and interfaces, gives options and settings, then starts
+            /// a test.
+            $vis struct $ty { runtime: $crate::testbench::Runtime<$tb> }
 
-        #[::veryl_component::component_impl]
-        impl $ty {
-            fn on_build(
-                &mut self,
-                ctx: &mut ::veryl_component::BuildCtx,
-            ) -> ::veryl_component::Result<()> {
-                $crate::host::entry::on_build(ctx, |ctx| {
-                    $crate::host::HookSubscriber::on_build(&mut self.runtime, ctx)
-                })
-            }
-
-            fn on_init(
+            /// Starts the test `test`, as UVM's `run_test`.
+            fn start(
                 &mut self,
                 ctx: &mut ::veryl_component::SimCtx,
+                test: ::std::string::String,
             ) -> ::veryl_component::Result<()> {
-                $crate::host::entry::on_init(ctx, || {
-                    $crate::host::HookSubscriber::on_init(&mut self.runtime)
+                $crate::host::entry::start(ctx, ::core::option::Option::Some(&test), |test| {
+                    self.__verald_on_start(test)
                 })
-            }
-
-            fn on_clock(
-                &mut self,
-                ctx: &mut ::veryl_component::SimCtx,
-            ) -> ::veryl_component::Result<()> {
-                $crate::host::entry::on_clock(ctx, || {
-                    $crate::host::HookSubscriber::on_clock(&mut self.runtime)
-                })
-            }
-
-            fn on_reset(
-                &mut self,
-                ctx: &mut ::veryl_component::SimCtx,
-            ) -> ::veryl_component::Result<()> {
-                $crate::host::entry::on_reset(ctx, || {
-                    $crate::host::HookSubscriber::on_reset(&mut self.runtime)
-                })
-            }
-
-            fn on_finish(
-                &mut self,
-                ctx: &mut ::veryl_component::SimCtx,
-            ) -> ::veryl_component::Result<()> {
-                $crate::host::entry::on_finish(ctx, || {
-                    $crate::host::HookSubscriber::on_finish(&mut self.runtime)
-                })
-            }
-
-            /// Registers a clock under `name`.
-            fn set_clock(
-                &mut self,
-                ctx: &mut ::veryl_component::SimCtx,
-                name: ::std::string::String,
-                clk: ::veryl_component::ClockPort,
-            ) -> ::veryl_component::Result<()> {
-                $crate::testbench::set_clock(ctx, name, clk)
             }
 
             /// Makes the clock registered as `name` the master clock, which
@@ -141,46 +96,6 @@ macro_rules! component {
                 name: ::std::string::String,
             ) -> ::veryl_component::Result<()> {
                 $crate::testbench::set_master_clock(ctx, name)
-            }
-
-            /// Registers a reset under `name`.
-            fn set_reset(
-                &mut self,
-                ctx: &mut ::veryl_component::SimCtx,
-                name: ::std::string::String,
-                rst: ::veryl_component::ResetPort,
-            ) -> ::veryl_component::Result<()> {
-                $crate::testbench::set_reset(ctx, name, rst)
-            }
-
-            /// Registers an interface (a modport) under `name`.
-            fn set_interface(
-                &mut self,
-                ctx: &mut ::veryl_component::SimCtx,
-                name: ::std::string::String,
-                bus: ::veryl_component::ModportRef,
-            ) -> ::veryl_component::Result<()> {
-                $crate::testbench::set_interface(ctx, name, bus)
-            }
-
-            /// Registers a signal the testbench reads under `name`.
-            fn set_input(
-                &mut self,
-                ctx: &mut ::veryl_component::SimCtx,
-                name: ::std::string::String,
-                sig: ::veryl_component::InputPort,
-            ) -> ::veryl_component::Result<()> {
-                $crate::testbench::set_input(ctx, name, sig)
-            }
-
-            /// Registers a signal the testbench drives under `name`.
-            fn set_output(
-                &mut self,
-                ctx: &mut ::veryl_component::SimCtx,
-                name: ::std::string::String,
-                sig: ::veryl_component::OutputPort,
-            ) -> ::veryl_component::Result<()> {
-                $crate::testbench::set_output(ctx, name, sig)
             }
 
             /// Gives an option of the framework, checked at once.
@@ -201,15 +116,6 @@ macro_rules! component {
                 value: ::veryl_component::Value,
             ) -> ::veryl_component::Result<()> {
                 $crate::testbench::set(ctx, key, value)
-            }
-
-            /// Starts the test `test`, as UVM's `run_test`.
-            fn start(
-                &mut self,
-                ctx: &mut ::veryl_component::SimCtx,
-                test: ::std::string::String,
-            ) -> ::veryl_component::Result<()> {
-                $crate::testbench::start::<$tb>(ctx, test)
             }
         }
     };

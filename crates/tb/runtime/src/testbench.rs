@@ -2,15 +2,17 @@
 //! testbench component, and what they do to the runtime.
 //!
 //! The component holds nothing; the runtime's state is thread-local (see
-//! `state`). The test module registers clocks, resets and interfaces, gives
-//! options and settings, then calls `start`, as UVM's `run_test`:
+//! `state`). The test module registers clocks, resets and interfaces (with
+//! the host layer, whose table the runtime builds its clocks and resets
+//! over at `start`), gives options and settings, then calls `start`, as
+//! UVM's `run_test`:
 //!
 //! ```veryl
 //! inst tb: $comp::tb;
 //! initial {
 //!     tb.set_clock("clk", clk);
 //!     tb.set_reset("rst", rst);
-//!     tb.set_interface("bus", bus.tb);
+//!     tb.set_modport("bus", bus.tb);
 //!     tb.start("my_test");
 //!     clk.start();
 //! }
@@ -27,14 +29,14 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use veryl_component::{
-    ClockPort, InputPort, MemberPort, ModportRef, OutputPort, ResetPort, SimCtx, Value, bail,
+    ClockPort, InputPort, ModportRef, OutputPort, ResetPort, SimCtx, Value, bail,
 };
 
 use crate::TestError;
 use crate::args::{self, ArgValue};
 use crate::clocking::Clocks;
 use crate::executor::{self, Polled};
-use crate::host::{self, HookGuard, HookSubscriber, HostError, Signals};
+use crate::host::{self, HookSubscriber, HostError, Signals, registrations};
 use crate::signals::{Clock, ClockState, Reset, ResetState};
 use crate::state::{self, EndHandler, Phase, RunEnd, Setting, with_state};
 
@@ -99,9 +101,9 @@ impl Start {
             .ok_or_else(|| TestError::new(format!("no reset is registered as `{name}`")))
     }
 
-    /// The interface registered as `name`.
-    pub fn interface(&self, name: &str) -> Result<ModportRef, TestError> {
-        registered_interface(name)
+    /// The modport registered as `name`.
+    pub fn modport(&self, name: &str) -> Result<ModportRef, TestError> {
+        registered_modport(name)
     }
 
     /// The signal the testbench reads at `path`: one registered with
@@ -162,27 +164,22 @@ impl Start {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Registered;
 
-/// A registration's error, as the host layer's `Signals` returns it.
-fn to_host_error(error: TestError) -> HostError {
-    HostError::new(error.message())
-}
-
 impl Signals for Registered {
     type Members = ModportRef;
-    fn interface(&self, name: &str) -> Result<ModportRef, HostError> {
-        registered_interface(name).map_err(to_host_error)
+    fn modport(&self, name: &str) -> Result<ModportRef, HostError> {
+        registrations::modport(name)
     }
     fn input(&self, path: &str) -> Result<InputPort, HostError> {
-        registered_input(path).map_err(to_host_error)
+        registrations::input(path)
     }
     fn output(&self, path: &str) -> Result<OutputPort, HostError> {
-        registered_output(path).map_err(to_host_error)
+        registrations::output(path)
     }
     fn clock_port(&self, name: &str) -> Result<ClockPort, HostError> {
-        registered_clock_port(name).map_err(to_host_error)
+        registrations::clock(name)
     }
     fn reset_port(&self, name: &str) -> Result<ResetPort, HostError> {
-        registered_reset_port(name).map_err(to_host_error)
+        registrations::reset(name)
     }
 }
 
@@ -203,11 +200,11 @@ macro_rules! __registered_signals {
     ($ty:ty) => {
         impl $crate::Signals for $ty {
             type Members = $crate::host::ModportRef;
-            fn interface(
+            fn modport(
                 &self,
                 name: &str,
             ) -> ::core::result::Result<Self::Members, $crate::HostError> {
-                $crate::Signals::interface(&$crate::testbench::Registered, name)
+                $crate::Signals::modport(&$crate::testbench::Registered, name)
             }
             fn input(
                 &self,
@@ -254,63 +251,21 @@ macro_rules! __registered_signals {
 
 crate::__registered_signals!(Start);
 
-/// The interface registered as `name`.
-pub fn registered_interface(name: &str) -> Result<ModportRef, TestError> {
-    with_state(|s| {
-        s.interfaces
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, bus)| bus.clone())
-    })
-    .ok_or_else(|| TestError::new(format!("no interface is registered as `{name}`")))
-}
-
-/// The interface and member a dotted path names: `bus.done`.
-fn member_path(path: &str) -> Option<(ModportRef, &str)> {
-    let (interface, member) = path.rsplit_once('.')?;
-    Some((registered_interface(interface).ok()?, member))
+/// The modport registered as `name`.
+pub fn registered_modport(name: &str) -> Result<ModportRef, TestError> {
+    Ok(registrations::modport(name)?)
 }
 
 /// The signal the testbench reads at `path`: one registered with
 /// `set_input`, or a member of an interface (`"bus.done"`).
 pub fn registered_input(path: &str) -> Result<InputPort, TestError> {
-    if let Some(port) = with_state(|s| s.inputs.iter().find(|(n, _)| n == path).map(|(_, p)| *p)) {
-        return Ok(port);
-    }
-    match member_path(path) {
-        Some((bus, member)) => Ok(bus.input(member)?),
-        None => Err(TestError::new(format!(
-            "no input is registered as `{path}`"
-        ))),
-    }
+    Ok(registrations::input(path)?)
 }
 
 /// The signal the testbench drives at `path`: one registered with
 /// `set_output`, or a member of an interface (`"bus.start"`).
 pub fn registered_output(path: &str) -> Result<OutputPort, TestError> {
-    if let Some(port) = with_state(|s| s.outputs.iter().find(|(n, _)| n == path).map(|(_, p)| *p)) {
-        return Ok(port);
-    }
-    match member_path(path) {
-        Some((bus, member)) => Ok(bus.output(member)?),
-        None => Err(TestError::new(format!(
-            "no output is registered as `{path}`"
-        ))),
-    }
-}
-
-/// Enters a hook through the host layer's frame. `None` when the hook has
-/// nothing to do: no simulation, or a component poisoned by a panic.
-fn enter(ctx: &mut SimCtx) -> Option<HookGuard> {
-    if !state::exists() {
-        return None;
-    }
-    host::enter(ctx)
-}
-
-/// Leaves a hook normally.
-fn leave() {
-    host::leave();
+    Ok(registrations::output(path)?)
 }
 
 fn wake_all(wakers: Vec<std::task::Waker>) {
@@ -437,14 +392,12 @@ pub fn registered_reset(name: &str) -> Result<Reset, TestError> {
 
 /// The port of the clock registered as `name`.
 pub fn registered_clock_port(name: &str) -> Result<ClockPort, TestError> {
-    with_state(|s| s.clocks.iter().find(|c| c.name == name).map(|c| c.port))
-        .ok_or_else(|| TestError::new(format!("no clock is registered as `{name}`")))
+    Ok(registrations::clock(name)?)
 }
 
 /// The port of the reset registered as `name`.
 pub fn registered_reset_port(name: &str) -> Result<ResetPort, TestError> {
-    with_state(|s| s.resets.iter().find(|r| r.name == name).map(|r| r.port))
-        .ok_or_else(|| TestError::new(format!("no reset is registered as `{name}`")))
+    Ok(registrations::reset(name)?)
 }
 
 /// The runtime as a subscriber of the host layer's hooks, over the
@@ -467,6 +420,17 @@ impl<T: Testbench> HookSubscriber for Runtime<T> {
         state::init();
         T::init();
         Ok(())
+    }
+
+    /// Starts the test (the test module's `start`), as UVM's `run_test`, and
+    /// runs its tasks up to their first waits (time 0). The runtime
+    /// arguments are taken first: `VERALD_TESTNAME` names the test over
+    /// `test`, and `VERALD_<KEY>` sets options.
+    fn on_start(&mut self, test: Option<&str>) -> Result<(), HostError> {
+        if !state::exists() {
+            return Ok(());
+        }
+        start::<T>(test.unwrap_or_default()).map_err(|e| HostError::new(e.message()))
     }
 
     /// Counts the edge of the clock that fired, wakes its waiters, releases
@@ -530,6 +494,8 @@ impl<T: Testbench> HookSubscriber for Runtime<T> {
         if state::exists() && !host::poisoned() {
             match with_state(|s| s.phase) {
                 Phase::Setup => ctx_fail("the testbench was not started: call `start`"),
+                // A finish a failure caused is expected.
+                Phase::Running if host::failed() => {}
                 Phase::Running => ctx_fail(&format!(
                     "unexpected finish: the simulation ended before the test did \
                      (the test module's `$finish` or cycle limit?); {}",
@@ -557,83 +523,14 @@ fn in_setup(what: &str) -> veryl_component::Result<()> {
     Ok(())
 }
 
-fn check_name(name: &str) -> veryl_component::Result<()> {
-    if name.is_empty() {
-        bail!("an empty name cannot be registered");
-    }
-    if with_state(|s| s.has_name(name)) {
-        bail!("`{name}` is already registered");
-    }
-    Ok(())
-}
-
-/// `set_clock(name, clk)`: registers a clock.
-pub fn set_clock(_ctx: &mut SimCtx, name: String, clk: ClockPort) -> HookResult {
-    in_setup("set_clock")?;
-    check_name(&name)?;
-    with_state(|s| s.clocks.push(ClockState::new(name, clk)));
-    Ok(())
-}
-
 /// `set_master_clock(name)`: the clock the timeout counts, over the first
 /// registered.
 pub fn set_master_clock(_ctx: &mut SimCtx, name: String) -> HookResult {
     in_setup("set_master_clock")?;
-    let Some(index) = with_state(|s| s.clocks.iter().position(|c| c.name == name)) else {
-        bail!("set_master_clock: no clock is registered as `{name}`");
-    };
-    with_state(|s| s.master_clock = Some(index));
-    Ok(())
-}
-
-/// `set_reset(name, rst)`: registers a reset.
-pub fn set_reset(_ctx: &mut SimCtx, name: String, rst: ResetPort) -> HookResult {
-    in_setup("set_reset")?;
-    check_name(&name)?;
-    host::track_reset(rst);
-    with_state(|s| s.resets.push(ResetState::new(name, rst)));
-    Ok(())
-}
-
-/// `set_interface(name, bus.modport)`: registers an interface; its clock and
-/// reset members are registered as `<name>.<member>`.
-pub fn set_interface(_ctx: &mut SimCtx, name: String, bus: ModportRef) -> HookResult {
-    in_setup("set_interface")?;
-    check_name(&name)?;
-    for member in bus.members() {
-        let path = format!("{name}.{}", member.name);
-        match member.port {
-            MemberPort::Clock(port) => {
-                check_name(&path)?;
-                with_state(|s| s.clocks.push(ClockState::new(path, port)));
-            }
-            MemberPort::Reset(port) => {
-                check_name(&path)?;
-                host::track_reset(port);
-                with_state(|s| s.resets.push(ResetState::new(path, port)));
-            }
-            MemberPort::Input(_) | MemberPort::Output(_) => {}
-        }
+    if let Err(error) = registrations::clock(&name) {
+        bail!("set_master_clock: {error}");
     }
-    with_state(|s| s.interfaces.push((name, bus)));
-    Ok(())
-}
-
-/// `set_input(name, sig)`: registers a signal the testbench reads, outside
-/// any interface (an interrupt).
-pub fn set_input(_ctx: &mut SimCtx, name: String, sig: InputPort) -> HookResult {
-    in_setup("set_input")?;
-    check_name(&name)?;
-    with_state(|s| s.inputs.push((name, sig)));
-    Ok(())
-}
-
-/// `set_output(name, sig)`: registers a signal the testbench drives,
-/// outside any interface.
-pub fn set_output(_ctx: &mut SimCtx, name: String, sig: OutputPort) -> HookResult {
-    in_setup("set_output")?;
-    check_name(&name)?;
-    with_state(|s| s.outputs.push((name, sig)));
+    with_state(|s| s.master_clock_name = Some(name));
     Ok(())
 }
 
@@ -715,18 +612,25 @@ pub fn set(_ctx: &mut SimCtx, key: String, value: Value) -> HookResult {
     Ok(())
 }
 
-/// `start(test)`: starts the test, as UVM's `run_test`, and runs its tasks
-/// up to their first waits (time 0). The runtime arguments are taken first:
-/// `VERALD_TESTNAME` names the test over `test`, and `VERALD_<KEY>` sets options.
-pub fn start<T: Testbench>(ctx: &mut SimCtx, test: String) -> HookResult {
-    in_setup("start")?;
-    let test = match take_runtime_args::<T>() {
-        Ok(name) => name.unwrap_or(test),
-        Err(error) => bail!("{error}"),
-    };
-    let Some(_guard) = enter(ctx) else {
-        return Ok(());
-    };
+/// Starts the test `test`, at the test module's `start`: builds the clocks
+/// and resets over the registrations, takes the runtime arguments, and lets
+/// the testbench spawn its tasks.
+fn start<T: Testbench>(test: &str) -> Result<(), TestError> {
+    with_state(|s| {
+        s.clocks = registrations::clocks()
+            .into_iter()
+            .map(|(name, port)| ClockState::new(name, port))
+            .collect();
+        s.resets = registrations::resets()
+            .into_iter()
+            .map(|(name, port)| ResetState::new(name, port))
+            .collect();
+        s.master_clock = match &s.master_clock_name {
+            Some(name) => s.clocks.iter().position(|c| &c.name == name),
+            None => None,
+        };
+    });
+    let test = take_runtime_args::<T>()?.unwrap_or_else(|| test.to_string());
     let mut start = Start { test, main: false };
     let started = T::start(&mut start);
     let result = started.and_then(|()| {
@@ -753,14 +657,12 @@ pub fn start<T: Testbench>(ctx: &mut SimCtx, test: String) -> HookResult {
         Ok(()) => {
             with_state(|s| s.phase = Phase::Running);
             run();
-            leave();
             Ok(())
         }
         Err(error) => {
             with_state(|s| s.phase = Phase::Ended);
             executor::drop_all();
-            leave();
-            bail!("test `{}`: {error}", start.test)
+            Err(TestError::new(format!("test `{}`: {error}", start.test)))
         }
     }
 }

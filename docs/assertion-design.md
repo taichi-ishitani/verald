@@ -52,7 +52,7 @@ Assertions are a crate of Verald, as constrained random is
   -> property IR
   -> a state machine per property (Rust code)
 test module's initial                      (run time)
-  -> signals registered (tb.set_clock, tb.set_interface, ..)
+  -> signals registered (tb.set_clock, tb.set_modport, ..)
   -> the assertion struct bound to them by name, widths checked
 each clock edge (component hook)
   1. sampled values read
@@ -571,7 +571,7 @@ module fifo_test {
     initial {
         tb.set_clock("dut.i_clk", clk);
         tb.set_reset("dut.i_rst", rst);
-        tb.set_interface("dut.bus", bus.monitor);
+        tb.set_modport("dut.bus", bus.monitor);
         tb.bind_to_instance("dut", "FifoSva");
         tb.start("FifoTest");
         clk.start();
@@ -663,7 +663,7 @@ What the layer is to gain before the proof of concept:
   one component holding the testbench, the assertions, or both, the hooks
   dispatched to them in order (assertions first).
 - **The registrations in the layer**: the table of names to ports
-  (`set_clock`, `set_reset`, `set_interface`, `set_input`, `set_output`)
+  (`set_clock`, `set_reset`, `set_modport`, `set_input`, `set_output`)
   and its `Signals`, moved from the runtime, so that a component without
   the testbench has them too. What a name means beyond a port (`Clock` and
   `Reset`, which tasks wait on) stays in the runtime, over the layer's
@@ -695,7 +695,7 @@ struct BusMon {
 struct BusSva {
     #[clock]   clk: Clock,
     #[reset]   rst: Reset,
-    #[modport] bus: BusMon,     // tb.set_interface("bus", bus.monitor)
+    #[modport] bus: BusMon,     // tb.set_modport("bus", bus.monitor)
     outstanding: u32,           // auxiliary state
 }
 

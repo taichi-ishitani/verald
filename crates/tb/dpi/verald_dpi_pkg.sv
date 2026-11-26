@@ -28,7 +28,7 @@ package verald_dpi_pkg;
     // Bind the names the testbench looks up to the table's keys; 0 if done.
     import "DPI-C" function int verald_set_clock(input string name, input int key);
     import "DPI-C" function int verald_set_reset(input string name, input int key);
-    import "DPI-C" function int verald_set_interface(input string name, input int key);
+    import "DPI-C" function int verald_set_modport(input string name, input int key);
     import "DPI-C" function int verald_set_input(input string name, input int key);
     import "DPI-C" function int verald_set_output(input string name, input int key);
 

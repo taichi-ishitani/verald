@@ -163,6 +163,16 @@ impl Testbench for Tests {
                     Ok(())
                 });
             }
+            "fail_outside" => {
+                // A failure the runtime does not cause (an assertion's).
+                let clk = start.clock("clk")?;
+                start.main("test", async move {
+                    clk.wait(1).await;
+                    verald_tb_runtime::host::fail("an assertion failed");
+                    clk.wait(100).await;
+                    Ok(())
+                });
+            }
             "panic" => {
                 let clk = start.clock("clk")?;
                 start.main("test", async move {
@@ -323,6 +333,15 @@ fn a_finish_before_the_test_ends_is_unexpected() {
     assert_eq!(sim.failures().len(), 1);
     assert!(sim.failures()[0].starts_with("unexpected finish"));
     assert!(sim.failures()[0].ends_with("tasks alive: env.monitor, test"));
+}
+
+#[test]
+fn a_finish_after_a_failure_is_expected() {
+    let (mut sim, mut tb) = setup();
+    sim.call(&mut tb, "start", &[str("fail_outside")]).unwrap();
+    clock(&mut sim, &mut tb, 2);
+    sim.finish(&mut tb).unwrap();
+    assert_eq!(sim.failures(), ["an assertion failed"]);
 }
 
 #[test]
