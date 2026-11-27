@@ -269,6 +269,8 @@ top, a part's crates are under its directory.
   design study.
 - [docs/veryl-proposals.md](docs/veryl-proposals.md): what Verald would
   want of Veryl.
+- [docs/todo.md](docs/todo.md): what is left to do, gathered from the
+  documents above.
 
 ## License
 

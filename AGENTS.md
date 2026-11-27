@@ -11,6 +11,9 @@ framework. Implementation proceeds step by step (the runtime's core first);
 - Before changing code, explain the purpose and get the user's approval.
 - The user decides where a piece of work ends.
 - Record design decisions in `docs/design.md` as they are made.
+- Keep [docs/todo.md](docs/todo.md), the list of what is left, in step
+  with the design documents' TODO and deferred items: add an item there
+  when one is deferred, and remove it when it is done.
 - Before relying on when the simulator calls a component's hooks, read
   [docs/host-layer-design.md](docs/host-layer-design.md) ("Hooks", "The
   state of a reset"): in a reset the testbench holds, each edge calls
