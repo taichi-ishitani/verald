@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "packages": {},
+  "interfaces": {
+    "adder_if": {
+      "modports": [
+        {
+          "name": "dut",
+          "members": [
+            {
+              "name": "start",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "a",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 8,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "b",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 8,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "done",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "result",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 9,
+                  "signed": false
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "tb",
+          "members": [
+            {
+              "name": "start",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "a",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 8,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "b",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 8,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "done",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "result",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 9,
+                  "signed": false
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,6 +1,7 @@
 //! Parsing the fields of a signal struct (`#[input]`, `#[output]`,
-//! `#[modport]`, `#[clock]`, `#[reset]`) and the code shared by the structs generated over them:
-//! `#[modport]` here, `#[clocking]` in the testbench's macros.
+//! `#[modport]`, `#[clock]`, `#[reset]`) and the code shared by the structs
+//! generated over them: `#[clocking]` in the testbench's macros, assertion
+//! blocks in the assertions'.
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
@@ -29,6 +30,9 @@ pub struct FieldSpec {
     pub name: String,
     /// An output's initial value (`#[output(init = ..)]`), driven by `init`.
     pub init: Option<Expr>,
+    /// A modport's members' initial values (`#[modport(init(valid = false))]`),
+    /// driven by `init`.
+    pub modport_init: Vec<(Ident, Expr)>,
 }
 
 /// The name of the hidden field generated code keeps its state in.
@@ -44,7 +48,7 @@ pub fn take_fields(item: &mut ItemStruct, roles: &[Role]) -> syn::Result<Vec<Fie
     };
     let mut specs = Vec::new();
     for field in fields.named.iter_mut() {
-        let (role, init) = take_role(field, roles)?;
+        let (role, init, modport_init) = take_role(field, roles)?;
         let ident = field.ident.clone().expect("named field");
         specs.push(FieldSpec {
             name: ident.unraw().to_string(),
@@ -52,6 +56,7 @@ pub fn take_fields(item: &mut ItemStruct, roles: &[Role]) -> syn::Result<Vec<Fie
             ty: field.ty.clone(),
             role,
             init,
+            modport_init,
         });
     }
     Ok(specs)
@@ -75,6 +80,46 @@ impl Parse for InitArg {
     }
 }
 
+/// The initial values of `#[modport(init(a = .., b = ..))]`.
+struct ModportInit {
+    members: Vec<(Ident, Expr)>,
+}
+
+impl Parse for ModportInit {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let key: Ident = input.parse()?;
+        if key != "init" {
+            return Err(syn::Error::new(
+                key.span(),
+                "expected `init(member = <value>, ..)`",
+            ));
+        }
+        let content;
+        syn::parenthesized!(content in input);
+        let mut members = Vec::new();
+        while !content.is_empty() {
+            let member: Ident = content.parse()?;
+            content.parse::<syn::Token![=]>()?;
+            let expr: Expr = content.parse()?;
+            if members.iter().any(|(m, _): &(Ident, Expr)| *m == member) {
+                return Err(syn::Error::new(
+                    member.span(),
+                    format!("`{member}` is given twice"),
+                ));
+            }
+            members.push((member, expr));
+            if content.is_empty() {
+                break;
+            }
+            content.parse::<syn::Token![,]>()?;
+        }
+        Ok(ModportInit { members })
+    }
+}
+
+/// A field's role, an output's initial value, and a modport's members'.
+type RoleSpec = (Role, Option<Expr>, Vec<(Ident, Expr)>);
+
 /// Removes the tagged fields of a struct and returns their specs, leaving
 /// the fields without a role attribute (an assertion block's auxiliary
 /// state) in the struct.
@@ -89,7 +134,7 @@ pub fn take_tagged_fields(item: &mut ItemStruct, roles: &[Role]) -> syn::Result<
     let mut rest = syn::punctuated::Punctuated::new();
     for mut field in std::mem::take(&mut fields.named) {
         match field_role(&mut field, roles)? {
-            Some((role, init)) => {
+            Some((role, init, modport_init)) => {
                 let ident = field.ident.clone().expect("named field");
                 specs.push(FieldSpec {
                     name: ident.unraw().to_string(),
@@ -97,6 +142,7 @@ pub fn take_tagged_fields(item: &mut ItemStruct, roles: &[Role]) -> syn::Result<
                     ty: field.ty.clone(),
                     role,
                     init,
+                    modport_init,
                 });
             }
             None => rest.push(field),
@@ -106,7 +152,7 @@ pub fn take_tagged_fields(item: &mut ItemStruct, roles: &[Role]) -> syn::Result<
     Ok(specs)
 }
 
-fn take_role(field: &mut Field, roles: &[Role]) -> syn::Result<(Role, Option<Expr>)> {
+fn take_role(field: &mut Field, roles: &[Role]) -> syn::Result<RoleSpec> {
     field_role(field, roles)?.ok_or_else(|| {
         let names: Vec<&str> = roles
             .iter()
@@ -128,10 +174,12 @@ fn take_role(field: &mut Field, roles: &[Role]) -> syn::Result<(Role, Option<Exp
 }
 
 /// Removes the field's role attribute and returns the role (and an
-/// output's initial value); `None` for a field with none.
-fn field_role(field: &mut Field, roles: &[Role]) -> syn::Result<Option<(Role, Option<Expr>)>> {
+/// output's initial value, or a modport's members'); `None` for a field
+/// with none.
+fn field_role(field: &mut Field, roles: &[Role]) -> syn::Result<Option<RoleSpec>> {
     let mut role = None;
     let mut init = None;
+    let mut modport_init = Vec::new();
     let mut rest = Vec::new();
     for attr in field.attrs.drain(..) {
         let this = [
@@ -148,6 +196,8 @@ fn field_role(field: &mut Field, roles: &[Role]) -> syn::Result<Option<(Role, Op
             Some(this) => {
                 if this == Role::Output && matches!(attr.meta, syn::Meta::List(_)) {
                     init = Some(attr.parse_args::<InitArg>()?.expr);
+                } else if this == Role::Modport && matches!(attr.meta, syn::Meta::List(_)) {
+                    modport_init = attr.parse_args::<ModportInit>()?.members;
                 } else {
                     attr.meta.require_path_only()?;
                 }
@@ -159,7 +209,7 @@ fn field_role(field: &mut Field, roles: &[Role]) -> syn::Result<Option<(Role, Op
         }
     }
     field.attrs = rest;
-    Ok(role.map(|role| (role, init)))
+    Ok(role.map(|role| (role, init, modport_init)))
 }
 
 /// Binds the fields' values: an output's initial value where it has one

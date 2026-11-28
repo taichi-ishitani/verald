@@ -1,12 +1,12 @@
 //! A testbench for a register block on a simple valid/ready bus, over the
 //! bus's VIP (`regblock_vip`): a scoreboard holding a model of the
 //! registers, an environment, and tests that write every register and read
-//! it back. The bus's assertions (`regblock_assertions`) run beside it.
+//! it back. The bus's assertions (the VIP's) run beside it.
 
 #![allow(async_fn_in_trait)]
 
-use regblock_assertions::BusAssertions;
-use regblock_vip::*;
+use regblock_vip::agent::*;
+use regblock_vip::assertions::BusAssertions;
 use verald::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -300,7 +300,7 @@ async fn direct_test(test: &mut RegTest, run_context: &mut RunContext) -> Result
     Ok(())
 }
 
-// The testbench and the bus's assertions (`regblock_assertions`) in one component.
+// The testbench and the bus's assertions (the VIP's) in one component.
 verald::export!(
     "verald_regblock",
     testbench = Methodology,

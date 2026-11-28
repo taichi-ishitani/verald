@@ -10,11 +10,12 @@ The example is a Veryl project:
 
 ```text
 examples/regblock/
-├── Veryl.toml              the project, with its two components
+├── Veryl.toml              the project, with its two components and the VIP as a dependency
 ├── Makefile                runs every test, one after another
-├── src/regblock.veryl      the DUT, its bus, and the #[test] modules
-├── vip/                    the bus VIP: a library crate (regblock_vip)
-├── assertions/             the bus's assertions: a library crate (regblock_assertions)
+├── src/regblock.veryl      the DUT and the #[test] modules
+├── vip/                    the bus VIP, a Veryl project of its own (regblock_vip): its
+│                            interface (bus_if.veryl), and a library crate with its agent
+│                            and its assertions
 ├── component/              the testbench's component: the env, the tests
 │   ├── Cargo.toml
 │   └── src/lib.rs
@@ -45,9 +46,14 @@ with a seed, `make ARGS=..` with more arguments).
 `bus_if` is a valid/ready bus. A request is accepted at an edge where
 `valid` and `ready` are both high; a read's data comes back at the next
 edge, with `rvalid`. The interface has a modport for each side, and one
-for watching:
+for watching. It is the bus VIP's (`vip/bus_if.veryl`), marked
+`#[export(rust)]` so that its modports are generated for the VIP's Rust
+code (see [section 4](#4-the-bus-vip)). The VIP is a Veryl project of its
+own, which `Veryl.toml` takes in as a dependency, so the interface is
+named with the VIP project's name, `regblock_vip::bus_if`:
 
 ```veryl
+#[export(rust)]
 interface bus_if {
     var valid : logic    ;
     var ready : logic    ;
@@ -63,7 +69,13 @@ interface bus_if {
 }
 ```
 
-`regblock` holds eight 16-bit registers behind the `slave` modport. To give
+```toml
+[dependencies]
+regblock_vip = { path = "vip" }
+```
+
+`regblock` holds eight 16-bit registers behind the `slave` modport
+(`modport regblock_vip::bus_if::slave`). To give
 the testbench some back-pressure to deal with, `ready` drops one cycle in
 three.
 
@@ -78,7 +90,7 @@ what it needs and starts a test:
 module regblock_test {
     inst clk: $tb::clock_gen;
     inst rst: $tb::reset_gen (clk);
-    inst bus: bus_if;
+    inst bus: regblock_vip::bus_if;
     inst dut: regblock (
         i_clk: clk       ,
         i_rst: rst       ,
@@ -139,27 +151,26 @@ path = "component"
 ```
 
 The crate is a `cdylib` depending on `verald` and on `veryl-component`,
-which the derives behind `export!` name, and on the two library crates:
-the bus's VIP (`vip`, crate `regblock_vip`) and its assertions
-(`assertions`, crate `regblock_assertions`):
+which the derives behind `export!` name, and on the bus's VIP (`vip`,
+crate `regblock_vip`), a library providing the bus's interface, its agent
+and its assertions:
 
 ```toml
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-regblock_assertions = { path = "../assertions" }
 regblock_vip = { path = "../vip" }
 verald = { path = "../../../crates/verald" }
-veryl-component = { git = "https://github.com/veryl-lang/veryl", branch = "master" }
+veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/export-rust" }
 ```
 
 `src/lib.rs` imports the VIP and the prelude, and at its end registers
 the tests and exports the component once:
 
 ```rust
-use regblock_assertions::BusAssertions;
-use regblock_vip::*;
+use regblock_vip::agent::*;
+use regblock_vip::assertions::BusAssertions;
 use verald::prelude::*;
 
 // .. the testbench and the tests ..
@@ -177,18 +188,21 @@ verald::export!(
 );
 ```
 
-The VIP and the assertions are libraries, as a VIP shipped on its own
-would be. `BusAssertions` reads the bus through the VIP's monitor modport,
-`BusWatch`; it is shared with a second component
+The VIP is a library, as a VIP shipped on its own would be: it provides
+what a project using the bus needs, the interface for Veryl, the agent for
+the testbench and the assertions. `BusAssertions` reads the bus through the
+monitor modport, `bus_if::Monitor`; it is shared with a second component
 (`assertions_component`) that holds the assertions alone, whose test
 module, `regblock_assertions_test`, drives the bus itself.
 
 ## 4. The bus VIP
 
-The VIP's crate (`vip/src/lib.rs`) holds the item, the configuration, the
-modports and clocking blocks, the agent's parts and the agent, and a base
-for sequences (in [section 5](#5-sequences)). The testbench's crate uses it
-through `use regblock_vip::*`.
+The VIP's crate has three parts: the root (`vip/src/lib.rs`) generates the
+interface's modports (`import!(bus_if)`); `agent` (`vip/src/agent.rs`)
+holds the item, the configuration, the clocking blocks, the agent's parts
+and the agent, and a base for sequences (in [section 5](#5-sequences));
+`assertions` (`vip/src/assertions.rs`) holds the bus's assertions. The
+testbench's crate uses the agent through `use regblock_vip::agent::*`.
 
 ### The item
 
@@ -257,34 +271,40 @@ no string-keyed database. A configuration, once made, is put in one with
 ### Modports and clocking blocks
 
 The driver and the monitor see the bus through clocking blocks. A
-`#[modport]` struct lists the members of a modport as fields: `#[input]`
-fields are sampled, `#[output]` fields are driven. A `#[clocking]` struct
-ties modports to a clock, its `#[clock]` field:
+modport struct lists the members of a modport as fields: inputs are
+sampled, outputs are driven. The VIP writes none by hand: `bus_if` is
+marked `#[export(rust)]`, Veryl writes its description into the VIP's
+crate (`veryl.types.json`, kept current at each run and committed), and
+`import!` generates a struct per modport (`bus_if::Master`,
+`bus_if::Monitor`, `bus_if::Slave`). For Veryl to write into it, the
+VIP's crate is listed among the VIP project's `[[components]]` as a
+library (`library = true`: it exports no component, so Veryl does not
+build it as one); a dependency given by a path, as here, gets its
+description when the project using it runs. The crate depends on
+`veryl-component`, which the generated code names. A `#[clocking]` struct
+ties modports to a clock, its
+`#[clock]` field, and gives the outputs' idle values:
 
 ```rust
-#[modport]
-pub struct BusMaster {
-    #[output(init = false)] valid: bool,   // driven to false by `cb.init()`
-    #[output] write: bool,
-    #[output] addr: u8,
-    #[output] wdata: u16,
-    #[input]  ready: bool,
-    #[input]  rvalid: bool,
-    #[input]  rdata: u16,
-}
+// vip/src/lib.rs
+veryl_component::import!(bus_if);
 
+// vip/src/agent.rs
 #[clocking]
 pub struct DriverCb {
-    #[clock]   clk: Clock,
-    #[modport] bus: BusMaster,
+    #[clock]
+    clk: Clock,
+    // `cb.init()` drives `valid` low.
+    #[modport(init(valid = false))]
+    bus: bus_if::Master,
 }
 ```
 
 `tick!(cb)` drives the outputs changed since the last tick, waits for the
 next edge of the clock, and samples the inputs, as SystemVerilog's
 `@(cb)`. `tick_until!(cb.bus.rvalid)` ticks until the condition holds.
-The monitor has its own pair, `BusWatch` (every member an input; the
-bus's assertions read it too) and `MonitorCb`.
+The monitor has its own pair, `bus_if::Monitor` (every member an input;
+the bus's assertions read it too) and `MonitorCb`.
 
 ### The driver
 

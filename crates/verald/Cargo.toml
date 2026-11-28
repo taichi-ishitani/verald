@@ -10,7 +10,6 @@ publish.workspace = true
 [dependencies]
 verald-assertion = { workspace = true, optional = true }
 verald-host.workspace = true
-verald-macros.workspace = true
 verald-random = { workspace = true, optional = true }
 verald-tb-core = { workspace = true, optional = true }
 verald-tb-runtime = { workspace = true, optional = true }

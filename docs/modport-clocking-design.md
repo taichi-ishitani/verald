@@ -22,34 +22,35 @@ Each field binds to the modport member of its name. It is used as a
 `#[modport]` field of a `#[clocking]` struct, and of an assertion block
 (see [assertion-design.md](assertion-design.md#reusing-users-modport-structs)).
 
-`#[modport]` generates, for its struct:
+`#[modport]` is the component SDK's
+([veryl-lang/veryl#3772](https://github.com/veryl-lang/veryl/pull/3772),
+ported from Verald's own, which is removed). It generates, for its struct:
 
-- `ModportRead`: binding from a `MemberSource` (`__bind`, widths checked)
-  and loading every input field (`__load`);
+- `Modport`: binding from a `MemberSource` (`bind`, widths checked),
+  reading every input (`load`) and driving the outputs changed since they
+  were last driven (`store`), the SDK's `InputSignal` / `OutputSignal`
+  holding the members;
+- per member, `load_<x>` (an input alone, with which a wait reads only
+  what its condition names), and `force_<x>` / `assume_<x>` (an output
+  driven at once, or taken as last driven without driving it);
 - `InputOnly`, a marker, when the struct has no `#[output]` field. An
   assertion block requires it of its `#[modport]` fields, so a modport
   for driving is rejected at compile time.
 
-Storing the output fields, only those that changed, is clocking's: the
-runtime's `ModportDrive` (`__store`, `__init`), over the `Driven<T>` the
-macro generates for each output.
-`#[modport]` is `verald-macros`', its generation `verald-macros-codegen`'s
-(see [design.md](design.md#crate-layout)). It names the layer's crate
-through `proc-macro-crate` (`verald::host`, `verald_host`, or the
-runtime's re-export), and generates the parts driving outputs
-(`Driven<T>`, `ModportDrive`) only where the testbench's runtime is
-reached; without it, an `#[output]` field is an error.
+`import!` generates the same for each modport of an interface marked
+`#[export(rust)]`, so a modport declared in Veryl needs no struct written
+by hand. Verald re-exports the macro (`verald::prelude::modport`); its
+code names `::veryl_component`, so a crate declaring a modport depends on
+`veryl-component` itself, as a component crate does.
 
-What `#[clocking]` and the wait macros use of a modport struct, and so
-what a struct generated otherwise (by Veryl, veryl-lang/veryl#3712) has
-to give: `ModportRead` (`__bind`, `__load`), `ModportDrive` (`__store`,
-`__init`), and a method per field reading that field alone
-(`__verald_load_<field>`), with which a wait reads only what its
-condition names.
+The SDK's calls take the hook's `SimCtx`; Verald, which keeps the hook's
+context in the host layer, calls them through it (`host::with_sim`,
+`load_modport`, `store_modport`, `read_modport`). A value that is no value
+of its type (an enum's) fails the test, naming the member.
 
-The types it builds on (`InputSignal<T>`, `MemberSource`, `Signals`,
-`SignalValue`) are the host layer's: see
-[host-layer-design.md](host-layer-design.md#types).
+An output's initial value is not the modport's (the SDK's `#[modport]` has
+none): it is given where the modport is used, by the clocking block (see
+[Clocking blocks](#clocking-blocks)).
 
 ## Clocking blocks
 
@@ -76,8 +77,10 @@ users see follows rustdv-veryl's clocking blocks:
   its paths' type). Widths are checked against the fields' types at
   construction. Clocking stays on the component's side, not in Veryl (see
   [veryl-proposals.md](veryl-proposals.md#clocking-blocks-as-a-language-feature-a-study)).
-- Field types implement `SignalValue`: `bool`, the unsigned integers up to
-  `u128` and `BigUint` (any width). Signals are two-state: X and Z read as
+- A signal field's type implements `SignalValue`: `bool`, the unsigned
+  integers up to `u128` and `BigUint` (any width); a modport's members are
+  the SDK's `Packed` types (those, signed integers, arrays, `Value`, and
+  the types `import!` generates). Signals are two-state: X and Z read as
   0, as SystemVerilog's conversion to two-state types, and each type reads
   and writes itself through the host layer's direct paths (see
   [host-layer-design.md](host-layer-design.md#two-state-signals-first)).
@@ -85,16 +88,18 @@ users see follows rustdv-veryl's clocking blocks:
   last written (zero at first), so an output never assigned is never
   driven and the design's value stands; `tick` writes the changed outputs
   before waiting, `drive` writes them at once.
-- An output may declare an initial value, its idle value:
-  `#[output(init = false)] start: bool`, in a clocking block or a modport.
-  The field starts at it, taken as already driven; `cb.init()` assigns
-  every such output its value and drives it at once, whatever was last
-  driven, so a reset brings the bus to idle in one call
-  (`run_with_reset(rst, &mut cb, |cb| cb.init(), ..)`). An output
-  declares it where it is declared: in its modport, or, for a signal of its
-  own, in the clocking block. An output with no initial value has none
-  (it is uninitialized, as an undriven signal is undefined), so `init`
-  leaves it alone.
+- An output may declare an initial value, its idle value, in the clocking
+  block: `#[output(init = false)] start: bool` for a signal of its own, and
+  `#[modport(init(valid = false))] bus: bus_if::Master` for a modport's members
+  (a member that is no output of the modport is a compile error: it has no
+  `force_<x>`). The field starts at it, taken as already driven;
+  `cb.init()` assigns every such output its value and drives it at once,
+  whatever was last driven, so a reset brings the bus to idle in one call
+  (`run_with_reset(rst, &mut cb, |cb| cb.init(), ..)`). An output with no
+  initial value has none (it is uninitialized, as an undriven signal is
+  undefined), so `init` leaves it alone. A modport's initial values are the
+  clocking block's, not the modport's, since one modport struct serves
+  blocks with different idle states and the SDK's `#[modport]` has none.
 - `tick!(cb)`, and the waits `posedge`, `negedge`, `edge`, `changed`,
   `wait`, `tick_until`, `tick_while`, as methods taking a closure (reading
   every input at each edge) and as macros (reading only what the condition

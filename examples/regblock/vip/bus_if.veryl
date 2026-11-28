@@ -1,0 +1,43 @@
+/// A simple bus: a request is accepted at an edge where `valid` and `ready`
+/// are both high; a read's data comes back at the next edge, with `rvalid`.
+#[export(rust)]
+interface bus_if {
+    var valid : logic    ;
+    var ready : logic    ;
+    var write : logic    ;
+    var addr  : logic<3> ;
+    var wdata : logic<16>;
+    var rvalid: logic    ;
+    var rdata : logic<16>;
+
+    modport master {
+        valid : output,
+        ready : input ,
+        write : output,
+        addr  : output,
+        wdata : output,
+        rvalid: input ,
+        rdata : input ,
+    }
+
+    modport slave {
+        valid : input ,
+        ready : output,
+        write : input ,
+        addr  : input ,
+        wdata : input ,
+        rvalid: output,
+        rdata : output,
+    }
+
+    modport monitor {
+        valid : input,
+        ready : input,
+        write : input,
+        addr  : input,
+        wdata : input,
+        rvalid: input,
+        rdata : input,
+    }
+}
+

@@ -7,3 +7,6 @@ path = "component"
 
 [[components]]
 path = "assertions_component"
+
+[dependencies]
+regblock_vip = { path = "vip" }

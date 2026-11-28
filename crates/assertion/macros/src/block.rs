@@ -177,7 +177,8 @@ fn block_struct(mut item: ItemStruct) -> syn::Result<TokenStream2> {
     let modport_binds = modports.iter().map(|f| {
         let (ident, ty, name) = (&f.ident, &f.ty, &f.name);
         quote! {
-            #ident: <#ty as #p::ModportRead>::__bind(&#p::Signals::modport(signals, &at(#name))?)?
+            #ident: <#ty as #p::Modport>::bind(&#p::Signals::modport(signals, &at(#name))?)
+                .map_err(#p::HostError::from)?
         }
     });
     let samples = inputs
@@ -187,8 +188,8 @@ fn block_struct(mut item: ItemStruct) -> syn::Result<TokenStream2> {
             quote!(self.#ident = self.__verald.#ident.read();)
         })
         .chain(modports.iter().map(|f| {
-            let ident = &f.ident;
-            quote!(#p::ModportRead::__load(&mut self.#ident);)
+            let (ident, name) = (&f.ident, &f.name);
+            quote!(#p::load_modport(&mut self.#ident, #name);)
         }));
     let input_only = modports.iter().map(|f| {
         let ty = &f.ty;

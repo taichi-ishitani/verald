@@ -1,5 +1,6 @@
-//! `#[clocking]` and the wait macros. The field parsing and the parts
-//! shared with `#[modport]` are `verald-macros-codegen`'s.
+//! `#[clocking]` and the wait macros. The field parsing is
+//! `verald-macros-codegen`'s; modport fields are the component SDK's
+//! `Modport`s (`#[modport]`).
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
@@ -106,19 +107,45 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     });
     let signal_initials = initial_values(&signals);
     let signal_inits = init_body(&signals, &hidden);
-    let modport_inits = specs.iter().filter(|f| f.role == Role::Modport).map(|f| {
-        let ident = &f.ident;
-        quote!(#ck::ModportDrive::__init(&mut self.#ident);)
-    });
+    // A modport's members' initial values (`#[modport(init(valid = false))]`):
+    // assigned and taken as last driven at binding (not driven until
+    // `init`), assigned and driven at once by `init`.
+    let modport_inits: Vec<TokenStream2> = specs
+        .iter()
+        .filter(|f| f.role == Role::Modport)
+        .flat_map(|f| f.modport_init.iter().map(move |init| (&f.ident, init)))
+        .map(|(ident, (member, expr))| {
+            let force = format_ident!("force_{}", member.unraw());
+            quote! {
+                self.#ident.#member = #expr;
+                #ck::__private::with_sim(|ctx| self.#ident.#force(ctx));
+            }
+        })
+        .collect();
     let binds = specs.iter().map(|f| {
         let (ident, ty) = (&f.ident, &f.ty);
         let path = path_of(f);
         match f.role {
-            Role::Modport => quote! {
-                #ident: <#ty as #ck::__private::ModportRead>::__bind(
-                    &#ck::__private::Signals::modport(signals, #path)?,
-                )?
-            },
+            Role::Modport => {
+                let assumes = f.modport_init.iter().map(|(member, expr)| {
+                    let assume = format_ident!("assume_{}", member.unraw());
+                    quote! {
+                        modport.#member = #expr;
+                        modport.#assume();
+                    }
+                });
+                quote! {
+                    #ident: {
+                        #[allow(unused_mut)]
+                        let mut modport = <#ty as #ck::__private::Modport>::bind(
+                            &#ck::__private::Signals::modport(signals, #path)?,
+                        )
+                        .map_err(#ck::__private::HostError::from)?;
+                        #(#assumes)*
+                        modport
+                    }
+                }
+            }
             Role::Clock => quote!(#ident: #ck::Clocks::clock(signals, #path)?),
             Role::Reset => quote!(#ident: #ck::Clocks::reset(signals, #path)?),
             Role::Input | Role::Output => {
@@ -135,7 +162,10 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     let loads = specs.iter().filter_map(|f| {
         let ident = &f.ident;
         match f.role {
-            Role::Modport => Some(quote!(#ck::__private::ModportRead::__load(&mut self.#ident);)),
+            Role::Modport => {
+                let name = &f.name;
+                Some(quote!(#ck::__private::load_modport(&mut self.#ident, #name);))
+            }
             Role::Input => Some(quote!(self.#ident = self.#hidden.#ident.read();)),
             Role::Output | Role::Clock | Role::Reset => None,
         }
@@ -143,7 +173,7 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     let stores = specs.iter().filter_map(|f| {
         let ident = &f.ident;
         match f.role {
-            Role::Modport => Some(quote!(#ck::ModportDrive::__store(&mut self.#ident);)),
+            Role::Modport => Some(quote!(#ck::__private::store_modport(&mut self.#ident);)),
             Role::Output => Some(quote!(self.#hidden.#ident.store(&self.#ident);)),
             Role::Input | Role::Clock | Role::Reset => None,
         }
@@ -151,8 +181,9 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
     let load_methods = specs.iter().map(|f| {
         let ident = &f.ident;
         let method = load_method(&f.name);
+        let name = &f.name;
         let body = match f.role {
-            Role::Modport => quote!(#ck::__private::ModportRead::__load(&mut self.#ident);),
+            Role::Modport => quote!(#ck::__private::load_modport(&mut self.#ident, #name);),
             Role::Input => quote!(self.#ident = self.#hidden.#ident.read();),
             Role::Output | Role::Clock | Role::Reset => quote!(),
         };
@@ -205,7 +236,8 @@ pub(crate) fn clocking(attr: TokenStream2, item: TokenStream2) -> syn::Result<To
             #(#load_methods)*
 
             /// Assigns the outputs that declare an initial value
-            /// (`#[output(init = ..)]`) their value and drives them now,
+            /// (`#[output(init = ..)]`, and a modport's
+            /// `#[modport(init(..))]`) their value and drives them now,
             /// whatever was last driven: at a reset, to bring the bus to
             /// idle.
             #vis fn init(&mut self) {
@@ -506,8 +538,15 @@ pub(crate) fn wait(method: &str, input: TokenStream2, within: bool) -> syn::Resu
             .iter()
             .filter(|(modport, _)| !reads.modports.contains(modport))
             .map(|(modport, field)| {
-                let method = load_method(&field.unraw().to_string());
-                quote!(#param.#modport.#method();)
+                // A modport's member alone: the SDK's `load_<x>`.
+                let load = format_ident!("load_{}", field.unraw());
+                let what = format!("{}.{}", modport.unraw(), field.unraw());
+                let rt = runtime();
+                quote! {
+                    #rt::clocking::__private::read_modport(#what, |ctx| {
+                        #param.#modport.#load(ctx)
+                    });
+                }
             });
         let modports = reads.modports.iter().map(|field| {
             let method = load_method(&field.unraw().to_string());

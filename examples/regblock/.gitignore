@@ -1,7 +1,9 @@
 /target
 /component/target
-/assertions/target
-/vip/target
 /assertions_component/target
 /dependencies
 /.build
+# What `veryl build` writes: the SystemVerilog.
+/regblock.f
+*.sv
+*.sv.map

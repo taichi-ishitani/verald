@@ -1651,9 +1651,8 @@ hierarchy.
 | Crate (directory) | Contents |
 |---|---|
 | `verald` (`crates/verald`) | the entry point users depend on: re-exports the others (`verald::host`, `verald::tb::{runtime, core}`, `verald::random`, `verald::assertion`) with one prelude and `export!`; the parts are chosen by features (`tb`, `random` and `assertion` by default) |
-| `verald-host` (`crates/host`) | the host layer: the hook entry and its dispatch, the hook's context and services, panic detection, value conversion, typed signals and modports, `Signals` (see [host-layer-design.md](host-layer-design.md)) |
-| `verald-macros` (`crates/macros`) | the proc macros shared by the parts: `#[modport]` |
-| `verald-macros-codegen` (`crates/macros/codegen`) | a library: `#[modport]`'s code generation and the parts `#[clocking]` shares with it, as functions both macro crates call |
+| `verald-host` (`crates/host`) | the host layer: the hook entry and its dispatch, the hook's context and services, panic detection, value conversion, typed signals, `Signals`, and the component SDK's modports re-exported with the calls taking the hook's context (see [host-layer-design.md](host-layer-design.md)) |
+| `verald-macros-codegen` (`crates/macros/codegen`) | a library: the code generation shared by the macro crates (the fields of `#[clocking]` structs and assertion blocks, the crates' paths), as functions both call. Modport structs are the component SDK's `#[modport]` |
 | `verald-assertion` (`crates/assertion`) | assertions: the blocks' traits, the subscriber binding and evaluating them (see [assertion-design.md](assertion-design.md)) |
 | `verald-assertion-macros` (`crates/assertion/macros`) | its proc macros (`#[assertions]`) |
 | `verald-random` (`crates/random`) | constrained random; depends on nothing else here, so it can be used on its own |
@@ -1671,11 +1670,31 @@ entry point is `verald` alone, with features, rather than an entry point
 per part as well (`verald-tb`): one `export!` covers a component holding
 several parts.
 
-`#[modport]` is shared (the assertions bind modports too), and kept apart
-from `#[clocking]`: structs for an interface's modports may come to be
-generated from Veryl's description (veryl-lang/veryl#3712, for packages so
-far), with `verald-macros-codegen` moved to Veryl's component SDK as the
-functions it is.
+Modport structs are the component SDK's (`#[modport]`, `Modport`,
+`InputOnly`, and the structs `import!` generates from interfaces marked
+`#[export(rust)]`;
+[veryl-lang/veryl#3772](https://github.com/veryl-lang/veryl/pull/3772),
+for veryl-lang/veryl#3712), re-exported by Verald; Verald's own
+`#[modport]` and `verald-macros` are removed. They are shared (the
+assertions bind modports too) and kept apart from `#[clocking]`, which
+gives a modport's outputs their idle values (`#[modport(init(..))]`). The
+SDK's `Packed` and typed signals are to replace the host layer's for the
+remaining signal fields (see [TODO](#todo)).
+
+A VIP provides what a project using its interface needs, in one place
+(as `examples/regblock/vip` does): the interface and the packages used in
+Veryl, marked `#[export(rust)]` so that its Rust code generates their
+types with `import!`; the agent for the testbench; and the assertions on
+the interface. It is a Veryl project of its own, which a project takes in
+as a dependency (`[dependencies]`, its names then qualified by the
+project's: `regblock_vip::bus_if`). Its Rust crate is a library depending
+on `verald` and on `veryl-component` (which the generated code names),
+listed among its project's `[[components]]` as a library
+(`library = true`): Veryl writes into it the description `import!` reads
+(`veryl.types.json`, kept current at each run and committed), and neither
+builds nor loads it as a component. A dependency given by a path gets its
+description at the depending project's run; one from a repository brings
+it committed, as `veryl publish` does.
 
 What each side holds where they meet:
 
@@ -1839,6 +1858,15 @@ None at present; deferred work is under [TODO](#todo).
 
 ### Verald
 
+- Moving further onto Veryl's component SDK
+  ([veryl-lang/veryl#3772](https://github.com/veryl-lang/veryl/pull/3772)):
+  modports are its already (`#[modport]`, `Modport`, and the structs
+  `import!` generates); left are its `Packed` and typed signals in place of
+  the host layer's for the signal fields of clocking blocks and assertion
+  blocks (see [host-layer-design.md](host-layer-design.md#deferred-items)),
+  keeping the per-edge cost, and settings taken as generated structs
+  rather than sliced from a `Value`.
+
 - Drain time: a wait between the test's `run` returning and the end of the
   run phase (UVM's `set_drain_time`), in time or in clock edges. Not needed
   yet. (The case it solves: a monitor publishing the last transfer at the
@@ -1862,8 +1890,8 @@ None at present; deferred work is under [TODO](#todo).
   or a printout, as `UVM_NOCOMPARE` / `UVM_NOPRINT`), a printout in a
   fixed, readable form (UVM's table printer, for logs), and recording
   for a waveform or a transaction database. Packing to bits is the
-  component SDK's (see
-  [veryl-proposals.md](veryl-proposals.md#rust-types-generated-from-veryl-packages)).
+  component SDK's (`Packed`,
+  [veryl-lang/veryl#3772](https://github.com/veryl-lang/veryl/pull/3772)).
   Not needed yet.
 
 The UVM features left for later are listed under

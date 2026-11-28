@@ -67,7 +67,7 @@ pub use engine::{Assertions, BlockList, Instance};
 pub use functions::{Bits, countones, onehot, onehot0};
 pub use temporal::History;
 pub use verald_assertion_macros::assertions;
-pub use verald_macros::modport;
+pub use verald_host::modport;
 
 use verald_host::{self as host, ClockPort, HostError, ResetPort, Signals};
 
@@ -232,6 +232,7 @@ pub mod __private {
     pub use crate::temporal::{Antecedent, Consequent, Failed, Out, States};
     pub use verald_assertion_macros::__assertions_impl;
     pub use verald_host::{
-        ClockPort, HostError, InputOnly, InputSignal, ModportRead, ResetPort, Signals, failed, time,
+        ClockPort, HostError, InputOnly, InputSignal, Modport, ResetPort, Signals, failed,
+        load_modport, time,
     };
 }

@@ -4,7 +4,6 @@ members = [
     "crates/assertion",
     "crates/assertion/macros",
     "crates/host",
-    "crates/macros",
     "crates/macros/codegen",
     "crates/random",
     "crates/random/macros",
@@ -27,13 +26,13 @@ publish = false
 verald-assertion = { path = "crates/assertion" }
 verald-assertion-macros = { path = "crates/assertion/macros" }
 verald-host = { path = "crates/host" }
-verald-macros = { path = "crates/macros" }
 verald-macros-codegen = { path = "crates/macros/codegen" }
 verald-random = { path = "crates/random" }
 verald-random-macros = { path = "crates/random/macros" }
 verald-tb-core = { path = "crates/tb/core" }
 verald-tb-macros = { path = "crates/tb/macros" }
 verald-tb-runtime = { path = "crates/tb/runtime" }
-# Method reference arguments are not released yet (merged in master,
-# veryl-lang/veryl#3701): the `veryl +local` build is of the same commit.
-veryl-component = { git = "https://github.com/veryl-lang/veryl", branch = "master" }
+# Unreleased Veryl: master with veryl-lang/veryl#3772 (types generated
+# from `#[export(rust)]`, the SDK's signals), its branch until merged; the
+# `veryl +local` build is of the same commit.
+veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/export-rust" }

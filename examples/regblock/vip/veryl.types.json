@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "packages": {},
+  "interfaces": {
+    "bus_if": {
+      "modports": [
+        {
+          "name": "master",
+          "members": [
+            {
+              "name": "valid",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "ready",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "write",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "addr",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 3,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "wdata",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 16,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "rvalid",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "rdata",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 16,
+                  "signed": false
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "slave",
+          "members": [
+            {
+              "name": "valid",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "ready",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "write",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "addr",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 3,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "wdata",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 16,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "rvalid",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "rdata",
+              "direction": "output",
+              "type": {
+                "bits": {
+                  "width": 16,
+                  "signed": false
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "monitor",
+          "members": [
+            {
+              "name": "valid",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "ready",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "write",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "addr",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 3,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "wdata",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 16,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "rvalid",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 1,
+                  "signed": false
+                }
+              }
+            },
+            {
+              "name": "rdata",
+              "direction": "input",
+              "type": {
+                "bits": {
+                  "width": 16,
+                  "signed": false
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

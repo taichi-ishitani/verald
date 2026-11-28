@@ -18,7 +18,6 @@ to what Veryl does instead.
 ## Contents
 
 - [Clocking blocks as a language feature (a study)](#clocking-blocks-as-a-language-feature-a-study)
-- [Rust types generated from Veryl packages](#rust-types-generated-from-veryl-packages)
 - [A hook on reset release](#a-hook-on-reset-release)
 - [`%m` as a format specifier](#m-as-a-format-specifier)
 
@@ -156,8 +155,9 @@ today. How signals map to a testbench's types is the testbench's
 ### A clocking passed to a component has no parameters
 
 A clocking passed to a component belongs to an interface marked `#[export]`,
-as boundary types belong to `#[export]` packages (see "Rust types generated
-from Veryl packages"): such an interface, and the types of its signals,
+as boundary types belong to `#[export(rust)]` packages
+([veryl-lang/veryl#3772](https://github.com/veryl-lang/veryl/pull/3772)):
+such an interface, and the types of its signals,
 have no parameters and no generics, so every width is fixed by the
 definition and the layout is the same for every instance. Then:
 
@@ -168,8 +168,8 @@ definition and the layout is the same for every instance. Then:
   struct per clocking (and per modport), so they are defined once, in
   Veryl, with nothing generated for the user to manage; a struct-typed
   signal (an AXI channel) is a type of its `#[export]` package, whose
-  expansion `use(..)` names (see "Rust types generated from Veryl
-  packages").
+  expansion `use(..)` names (as #3772 does for packages and
+  interfaces).
 
 With that, Verald's own `#[modport]` / `#[clocking]` structs, which a
 user writes by hand today, go away.
@@ -249,171 +249,6 @@ dominates and the gain is smaller. How much each saves is to be measured.
 - Without it, the Rust-side `#[clocking]` stays, its binding (where the
   members and the clock come from) kept apart from its sampling and
   driving.
-
-## Rust types generated from Veryl packages
-
-Filed as [veryl-lang/veryl#3712](https://github.com/veryl-lang/veryl/issues/3712)
-(rewritten to this shape from the first one, Rust types published to
-Veryl; see "Set aside").
-
-A component takes structured values (a configuration) at a fixed width.
-The design's own types often take their widths from parameters or
-generics, fixed only per instance, so the boundary types are defined
-apart, in Veryl packages without parameters, marked `#[export]`, by the
-component's side (a VIP's Veryl part, or the testbench's), and Rust's
-types are generated from them: Veryl describes, a proc macro expands (the
-mechanism clocking blocks could use as well). A test module copies the design's values into a
-boundary type, where the parameters are known; a change to the design's
-struct breaks that copy at compile time.
-
-### Shape
-
-```veryl
-// a VIP's Veryl part: a package without parameters, exported to Rust (`import!` takes it)
-#[export]
-package bus_vip_pkg {
-    const REGS: u32 = 8;
-    enum Mode: logic<1> { Master, Slave }
-    struct BusConfig {
-        mode   : Mode     ,
-        regs   : logic<8> ,
-        timeout: logic<16>,
-    }
-}
-
-// a test module
-var cfg: bus_vip_pkg::BusConfig;
-assign cfg.regs    = REGS;      // a parameter's value, into a fixed width
-assign cfg.timeout = 1000;
-tb.set("bus", cfg);
-```
-
-```rust
-// the VIP's crate (`vip_bus_tb`): the package, as a public module with its
-// packing and unpacking, where the line is written
-veryl_component::import!(bus_vip_pkg);
-
-// the testbench, depending on the VIP's crate, reads it:
-// setup_context.get::<vip_bus_tb::bus_vip_pkg::BusConfig>("bus")
-
-// a testbench's package whose struct holds the VIP's: where that one is
-veryl_component::import!(regblock_pkg, use(bus_vip_pkg = vip_bus_tb::bus_vip_pkg));
-```
-
-### Flow
-
-- A package meant for Rust is marked `#[export]`, the pair of the Rust
-  side's `import!`. (Veryl once had an `export` declaration, since
-  removed; this is an attribute, and its name is never written out to
-  SystemVerilog, where `export` is reserved.) Veryl describes the
-  marked packages (their constants, enums, and structs with their fields'
-  widths) in `veryl.types.json`, next to the project's component crate,
-  as it would describe clockings (see "How the generation works" above):
-  written before the components are built, committed, kept current by a
-  hash of the Veryl sources. Marking keeps the design's packages out, so
-  a change to one does not rebuild the testbench, and lets Veryl check the
-  rules below where the package is written.
-- `import!(package)` reads it and expands the package as a public module
-  named after it, where the line is written, everything in it public
-  (fields included): a package is a namespace, taken whole, and these
-  types are the boundary between Veryl and Rust, with nothing to hide.
-  Each crate imports the packages it owns (a VIP's crate its package, a
-  testbench's crate its own): one line each, the same in any crate.
-- Nothing generated is left for the user to manage, and no `Cargo.toml` is
-  edited; a type changed in Veryl rebuilds the crate (the expansion
-  includes the description).
-
-### Pack and unpack
-
-A struct value crosses the boundary as bits: passed to a method, it
-arrives as one `Value` packed in Veryl's layout. `import!` therefore also
-generates, for each type, the conversion between those bits and the Rust
-type: unpack for values coming in, pack for values going out. It belongs
-to the SDK, since the packing is Veryl's rule and any component may take
-or return a struct (a model, a file reader). With it, a component method
-can take a generated type directly
-(`fn set_config(&mut self, ctx: &mut SimCtx, cfg: BusConfig)`), and the
-analyzer can check the argument's type (today a value argument's width is
-taken from the call site and not checked).
-
-The SDK's conversion would cover the primitives as well (`bool`, the
-integers, `BigUint` with a width, `Value`, `String`), so a component has
-one conversion layer, the SDK's: a component's trait implemented for
-every type the SDK converts would conflict with its own impls for the
-primitives, since the SDK might add impls for them later.
-
-Verald would use it in two places, dropping its own conversions
-(`FromSetting`, `SignalValue`):
-
-- Settings: `setup_context.get::<T>(key)` unpacks the `Value` a test module
-  passed with `tb.set`, a scalar or a generated struct alike; `tb.set`
-  stays a key and a `Value`.
-- Clocking blocks: a struct-typed signal is a field of its generated type,
-  unpacked when sampled and packed when driven.
-
-Sequence items stay Rust's own: they never cross to Veryl.
-
-### Rules
-
-- A `#[export]` package has no parameters or generics (as a clocking passed
-  to a component has none): the boundary's widths are fixed by
-  definitions. It refers to no package but `#[export]` ones. Veryl reports
-  a breach where the package is written.
-- A package nesting another's type (a field of a struct or enum of
-  another package; a testbench's configuration holding a VIP's) names
-  where that package was expanded: `use(bus_vip_pkg = vip_bus_tb::bus_vip_pkg)`,
-  a Rust path, which the user knows and Veryl does not (it does not read
-  Rust). Without it the expansion fails, naming the package. Since the
-  path is given, a package may be expanded anywhere in a crate, not only
-  at its root, and nothing about crates goes in `Veryl.toml`.
-- A field is a fixed-width vector (`bool` for one bit, `u8` .. `u128`,
-  `BigUint` above), signed ones as `i8` .. `i128`, an enum, an array, or a
-  struct of a described package. The layout is Veryl's packing (the first
-  field most significant); the generator follows it on both sides. X and Z
-  bits read as 0; a value no variant of an enum has fails the unpacking,
-  naming the field. A union is not expanded.
-
-Note: importing a package in two places makes two distinct Rust types,
-which neither Veryl nor Rust can catch; a package is imported once, in its
-owner's crate, and used from there.
-
-### What already works
-
-A struct variable passed to a method as a value arrives as one `Value` of
-the struct's whole width, fields from the most significant bit in
-declaration order (tried with 24 and 600 bits; only a method's return
-value is limited, to 512 bits). Until the proposal, a testbench wanting a
-struct may define it on both sides and write a `FromSetting` that slices
-the `Value`; Verald adds no interim derive, which the SDK's would
-replace. Settings are otherwise set one value at a time.
-
-### Set aside
-
-- Taking the design's types as they are: a width from a parameter or a
-  generic would need a bound to choose a Rust type, and a packed struct
-  the field offsets of each instance at run time. Boundary types without
-  parameters need neither.
-- Types defined in Rust and published to Veryl through the component's
-  manifest (the shape first filed as #3712): it kept the generated
-  artifacts inside Veryl's flow, but needed a second mechanism beside the
-  clockings', made the types' identity depend on which crate published
-  them, and turned the source of the boundary types from Veryl to Rust.
-  Expanding Veryl's description with a proc macro leaves nothing to
-  manage either, so the types are Veryl's, as the design's values and
-  types are.
-- Rust written out by Veryl as a crate, or as files a `build.rs` includes:
-  files to add to `Cargo.toml` and keep current, where a macro needs
-  neither.
-- Describing every package without parameters: the design's packages would
-  fill the description, and a change to any of them would rebuild the
-  testbench.
-- One `import!()` expanding every `#[export]` package of the project at the
-  crate's root, with the crate holding them named in `Veryl.toml` and
-  written into the description: a project with several crates (one per
-  VIP) would have all its packages in one of them, and the description
-  would carry Rust's crate names. Importing package by package, with
-  `use(..)` for what one nests, keeps each package in its owner's crate
-  and the Rust paths with the user, who writes them anyway.
 
 ## A hook on reset release
 

@@ -4,20 +4,10 @@
 use verald_tb_runtime::host;
 use verald_tb_runtime::prelude::*;
 
-/// The `tb` modport of `adder_if`, as values.
-#[modport]
-struct AdderBus {
-    #[output(init = false)]
-    start: bool,
-    #[output]
-    a: u8,
-    #[output]
-    b: u8,
-    #[input]
-    done: bool,
-    #[input]
-    result: u16,
-}
+// `adder_if` is marked `#[export(rust)]`: its modports are generated
+// (`adder_if::Tb` for `tb`), from the description Veryl writes into this
+// crate (`veryl.types.json`).
+veryl_component::import!(adder_if);
 
 /// The testbench's view of the adder, synchronized with `clk`: its bus,
 /// and the count of additions outside the bus.
@@ -25,8 +15,9 @@ struct AdderBus {
 struct AdderCb {
     #[clock]
     clk: Clock,
-    #[modport]
-    bus: AdderBus,
+    /// `init` drives `start` low.
+    #[modport(init(start = false))]
+    bus: adder_if::Tb,
     #[input]
     count: u8,
 }

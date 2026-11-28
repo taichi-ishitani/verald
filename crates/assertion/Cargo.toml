@@ -10,7 +10,6 @@ publish.workspace = true
 [dependencies]
 verald-assertion-macros.workspace = true
 verald-host.workspace = true
-verald-macros.workspace = true
 num-bigint = "0.5"
 
 [dev-dependencies]

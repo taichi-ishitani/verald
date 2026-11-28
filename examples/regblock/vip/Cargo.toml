@@ -6,6 +6,8 @@ publish = false
 
 [dependencies]
 verald = { path = "../../../crates/verald" }
+# `#[modport]` (the component SDK's) names it in the code it generates.
+veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "feat/export-rust" }
 
 # Standalone package.
 [workspace]

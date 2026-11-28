@@ -1,9 +1,10 @@
-//! The assertions on the register block's bus, over the VIP's monitor
-//! modport: shared by the testbench's component and the component holding
-//! the assertions alone.
+//! The bus's assertions, over the monitor modport: the VIP provides them
+//! beside its interface and its agent, for the testbench's component and
+//! for a component holding the assertions alone.
 
-use regblock_vip::BusWatch;
 use verald::prelude::*;
+
+use crate::bus_if;
 
 /// The bus protocol and the registers' contents, checked at each edge of
 /// `clk`: a request is accepted at an edge where `valid` and `ready` are
@@ -19,7 +20,7 @@ pub struct BusAssertions {
     #[reset]
     rst: Reset,
     #[modport]
-    bus_mon: BusWatch,
+    bus_mon: bus_if::Monitor,
     /// A read accepted at the previous edge, and its address.
     read: Option<u8>,
     /// The registers' contents, as the writes left them.

@@ -1,0 +1,7 @@
+/target
+/dependencies
+/.build
+# What Veryl writes: the SystemVerilog.
+/regblock_vip.f
+*.sv
+*.sv.map

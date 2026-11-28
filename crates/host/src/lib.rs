@@ -24,9 +24,10 @@ pub use veryl_component::{
 };
 
 pub use registry::Registered;
-pub use signal::{
-    InputOnly, InputSignal, MemberSource, ModportRead, OutputSignal, SignalValue, Signals,
-};
+pub use signal::{InputSignal, OutputSignal, SignalValue, Signals};
+/// Modports are the component SDK's: a struct of a modport's members
+/// (`#[modport]`, or one `import!` generates), bound from a member source.
+pub use veryl_component::{InputOnly, MemberSource, Modport, modport};
 
 /// The test module's registrations, closed by `start`.
 pub mod registrations {
@@ -385,6 +386,32 @@ fn with_ctx<R>(f: impl FnOnce(&mut SimCtx) -> R) -> Option<R> {
         // the context is live meanwhile.
         Some(f(unsafe { &mut *ctx }))
     }
+}
+
+/// Runs `f` with the simulator's context of the hook being run, for the
+/// component SDK's calls taking it (a modport's `load` and `store`).
+/// Panics outside a hook.
+pub fn with_sim<R>(f: impl FnOnce(&mut SimCtx) -> R) -> R {
+    with_ctx(f).unwrap_or_else(|| outside("reaching the simulator"))
+}
+
+/// Reads with `f` in the hook being run (a modport's `load`, or `load_<x>`
+/// for one member); a value that does not convert (no value of an enum)
+/// fails the test, naming `what`.
+pub fn read_modport(what: &str, f: impl FnOnce(&mut SimCtx) -> veryl_component::Result<()>) {
+    if let Err(error) = with_sim(f) {
+        fail(&format!("reading `{what}`: {error:#}"));
+    }
+}
+
+/// Reads every input of `modport` in the hook being run.
+pub fn load_modport<M: Modport>(modport: &mut M, what: &str) {
+    read_modport(what, |ctx| modport.load(ctx));
+}
+
+/// Drives the outputs of `modport` changed since they were last driven.
+pub fn store_modport<M: Modport>(modport: &mut M) {
+    with_sim(|ctx| modport.store(ctx));
 }
 
 fn outside(what: &str) -> ! {

@@ -1,11 +1,11 @@
-//! The layer's types for signals: values, typed signals, where signals come
-//! from, and typed modports.
+//! The layer's types for signals: values, typed signals, and where signals
+//! come from. Modports are the component SDK's (`#[modport]`, `Modport`).
 
 use std::fmt;
 
 use num_bigint::BigUint;
 use smallvec::SmallVec;
-use veryl_component::{ClockPort, InputPort, ModportRef, OutputPort, ResetPort};
+use veryl_component::{ClockPort, InputPort, OutputPort, ResetPort};
 
 use super::HostError;
 
@@ -125,11 +125,6 @@ impl<T: SignalValue> InputSignal<T> {
         })
     }
 
-    /// Binds the input member `name` of `source`.
-    pub fn member<M: MemberSource + ?Sized>(source: &M, name: &str) -> Result<Self, HostError> {
-        Self::bind(source.input(name)?, &format!("{}.{name}", source.path()))
-    }
-
     /// The value before the first sample: all zeros.
     pub fn zero(&self) -> T {
         T::default()
@@ -166,11 +161,6 @@ impl<T: SignalValue> OutputSignal<T> {
         })
     }
 
-    /// Binds the output member `name` of `source`.
-    pub fn member<M: MemberSource + ?Sized>(source: &M, name: &str) -> Result<Self, HostError> {
-        Self::bind(source.output(name)?, &format!("{}.{name}", source.path()))
-    }
-
     /// All zeros.
     pub fn zero(&self) -> T {
         T::default()
@@ -182,41 +172,13 @@ impl<T: SignalValue> OutputSignal<T> {
     }
 }
 
-/// What supplies a modport's members: a `ModportRef` the test module
-/// passed, later the probes of an instance's modport port.
-pub trait MemberSource {
-    /// The path naming the source in messages.
-    fn path(&self) -> &str;
-    fn input(&self, name: &str) -> Result<InputPort, HostError>;
-    fn output(&self, name: &str) -> Result<OutputPort, HostError>;
-    fn clock(&self, name: &str) -> Result<ClockPort, HostError>;
-    fn reset(&self, name: &str) -> Result<ResetPort, HostError>;
-}
-
-impl MemberSource for ModportRef {
-    fn path(&self) -> &str {
-        ModportRef::path(self)
-    }
-    fn input(&self, name: &str) -> Result<InputPort, HostError> {
-        Ok(ModportRef::input(self, name)?)
-    }
-    fn output(&self, name: &str) -> Result<OutputPort, HostError> {
-        Ok(ModportRef::output(self, name)?)
-    }
-    fn clock(&self, name: &str) -> Result<ClockPort, HostError> {
-        Ok(ModportRef::clock(self, name)?)
-    }
-    fn reset(&self, name: &str) -> Result<ResetPort, HostError> {
-        Ok(ModportRef::reset(self, name)?)
-    }
-}
-
 /// Where names bind, resolved to ports only. Which names exist is decided
 /// by the implementer: the runtime's registrations (`Start`, the
 /// methodology's `Scope`), later an instance's ports and observed signals.
 pub trait Signals {
-    /// What a modport's name resolves to.
-    type Members: MemberSource;
+    /// What a modport's name resolves to: the component SDK's member
+    /// source, which its `Modport::bind` takes.
+    type Members: veryl_component::MemberSource;
     /// The modport registered as `name`.
     fn modport(&self, name: &str) -> Result<Self::Members, HostError>;
     /// The signal read at `path`: a signal of its own, or an interface's
@@ -230,15 +192,3 @@ pub trait Signals {
     /// The reset at `name` (an interface's reset member as `"bus.rst"`).
     fn reset_port(&self, name: &str) -> Result<ResetPort, HostError>;
 }
-
-/// Implemented by `#[modport]` for its struct: binding from a member source
-/// and reading every input.
-#[doc(hidden)]
-pub trait ModportRead: Sized {
-    fn __bind<M: MemberSource + ?Sized>(source: &M) -> Result<Self, HostError>;
-    fn __load(&mut self);
-}
-
-/// Implemented by `#[modport]` for a struct with no `#[output]` field: it
-/// only reads, as an assertion block requires of its modports.
-pub trait InputOnly: ModportRead {}

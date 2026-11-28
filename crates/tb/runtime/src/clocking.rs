@@ -1,8 +1,9 @@
 //! Clocking blocks: signals read and written as plain struct fields.
 //!
-//! A `#[modport]` struct declares the members of an interface's modport as
-//! fields: `#[input]` fields are sampled, `#[output]` fields are driven. A
-//! `#[clocking]` struct holds modports and a clock, as SystemVerilog's
+//! A `#[modport]` struct (the component SDK's) declares the members of an
+//! interface's modport as fields: `#[input]` fields are sampled, `#[output]`
+//! fields are driven. A `#[clocking]` struct holds modports and a clock, as
+//! SystemVerilog's
 //! `clocking cb @(posedge clk)`: a `#[clock]` field, bound by name as the
 //! other fields are. `tick!(cb)` drives the outputs changed since
 //! the last tick, waits for the clock's next edge, and samples the inputs.
@@ -19,7 +20,9 @@
 //! #[clocking]
 //! struct AdderCb {
 //!     #[clock]   clk: Clock,
-//!     #[modport] bus: AdderBus,
+//!     // `cb.init()` drives `start` low (at a reset).
+//!     #[modport(init(start = false))]
+//!     bus: AdderBus,
 //! }
 //!
 //! let mut cb = start.clocking::<AdderCb>()?;
@@ -39,12 +42,12 @@ use std::pin::Pin;
 
 use veryl_component::OutputPort;
 
-use crate::host::{HostError, MemberSource, ModportRead, OutputSignal, SignalValue, Signals};
+use crate::host::{HostError, OutputSignal, SignalValue, Signals};
 use crate::{Clock, Reset, TestError};
 
-/// An output of a clocking block or a modport, driven only when its value
-/// changed: the host layer's `OutputSignal` and the value last driven.
-/// Generated code holds one per output field.
+/// An output of a clocking block, driven only when its value changed: the
+/// host layer's `OutputSignal` and the value last driven. Generated code
+/// holds one per output field (a modport's are the SDK's `OutputSignal`).
 #[doc(hidden)]
 pub struct Driven<T> {
     signal: OutputSignal<T>,
@@ -59,12 +62,6 @@ impl<T> fmt::Debug for Driven<T> {
 }
 
 impl<T: SignalValue> Driven<T> {
-    /// Binds the output member `name` of `source`, checking that it fits
-    /// `T`.
-    pub fn member<M: MemberSource + ?Sized>(source: &M, name: &str) -> Result<Self, HostError> {
-        Ok(Self::new(OutputSignal::member(source, name)?))
-    }
-
     /// Binds the output signal `port`; `what` names it in an error.
     pub fn bind(port: OutputPort, what: &str) -> Result<Self, HostError> {
         Ok(Self::new(OutputSignal::bind(port, what)?))
@@ -146,14 +143,6 @@ pub trait ClockingPaths {
     type Block;
     /// Binds the block at these paths.
     fn bind<S: Clocks + ?Sized>(self, signals: &S) -> Result<Self::Block, TestError>;
-}
-
-/// Implemented by `#[modport]` for its struct: driving the outputs, on top
-/// of the host layer's binding and reading (`ModportRead`).
-#[doc(hidden)]
-pub trait ModportDrive: ModportRead {
-    fn __store(&mut self);
-    fn __init(&mut self);
 }
 
 /// Implemented by `#[clocking]` for its struct.
@@ -419,6 +408,9 @@ pub mod waits {
 /// Items the generated code names, independent of the user's imports.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::host::{HostError, InputOnly, InputSignal, MemberSource, ModportRead, Signals};
+    pub use crate::host::{
+        HostError, InputOnly, InputSignal, Modport, Signals, load_modport, read_modport,
+        store_modport, with_sim,
+    };
     pub use crate::{Clock, TestError};
 }

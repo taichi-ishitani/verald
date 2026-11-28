@@ -38,7 +38,7 @@ pub mod prelude {
     #[cfg(feature = "assertion")]
     pub use verald_assertion::{assertions, check, countones, onehot, onehot0, seq};
     #[cfg(not(feature = "tb"))]
-    pub use verald_macros::modport;
+    pub use verald_host::modport;
     #[cfg(feature = "random")]
     pub use verald_random::{
         RandEnum, constraint_fn, constraints, randcase, randomize, randomize_with, std_randomize,

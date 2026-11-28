@@ -33,11 +33,11 @@ pub use signals::{Clock, Edges, Reset, ResetWait, run_with_reset};
 pub use state::RunEnd;
 pub use sync::{Event, Fifo, Permit, Semaphore};
 pub use testbench::{Start, Testbench};
-pub use verald_macros::modport;
 pub use verald_tb_macros::{
     changed, changed_within, clocking, edge, edge_within, negedge, negedge_within, posedge,
     posedge_within, tick_until, tick_until_within, tick_while, tick_while_within,
 };
+pub use veryl_component::modport;
 
 /// The names a testbench usually needs.
 pub mod prelude {

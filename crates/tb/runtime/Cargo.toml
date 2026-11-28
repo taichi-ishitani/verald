@@ -11,7 +11,6 @@ publish.workspace = true
 num-bigint = "0.5"
 veryl-component.workspace = true
 verald-host.workspace = true
-verald-macros.workspace = true
 verald-tb-macros.workspace = true
 verald-random.workspace = true
 

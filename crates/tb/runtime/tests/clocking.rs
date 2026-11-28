@@ -61,10 +61,11 @@ fn a_modport_of_inputs_only_is_input_only() {
     input_only::<BusMonitor>();
 }
 
-/// Outputs with initial values, in a modport and on their own.
+/// Outputs with initial values: a modport's members, given by the
+/// clocking block, and an output of its own.
 #[modport]
 struct InitBus {
-    #[output(init = 3)]
+    #[output]
     a: u8,
     #[output]
     start: bool,
@@ -74,7 +75,7 @@ struct InitBus {
 struct InitCb {
     #[clock]
     clk: Clock,
-    #[modport]
+    #[modport(init(a = 3))]
     bus: InitBus,
     #[output(init = true)]
     ack: bool,
@@ -374,7 +375,10 @@ fn a_member_too_wide_for_its_field_fails_the_start() {
     let (mut sim, mut tb) = setup();
     let error = sim.call(&mut tb, "start", &[str("narrow")]).unwrap_err();
     assert!(
-        error.to_string().contains("`bus.result` is 9 bits wide"),
+        // The component SDK's check of a modport member.
+        error
+            .to_string()
+            .contains("`bus.result` of 9 bits does not fit `u8`"),
         "{error}"
     );
 }

@@ -1,0 +1,7 @@
+[project]
+name = "regblock_vip"
+version = "0.1.0"
+
+[[components]]
+path = "."
+library = true

@@ -1,4 +1,5 @@
 /// Request/response bus of the adder.
+#[export(rust)]
 interface adder_if {
     var start : logic   ;
     var a     : logic<8>;
