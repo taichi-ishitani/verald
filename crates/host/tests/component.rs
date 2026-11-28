@@ -70,7 +70,7 @@ fn setup(args: impl FnOnce(MockSim) -> MockSim) -> (MockSim, Comp) {
     let mut comp = sim.build::<Comp>().unwrap();
     sim.init(&mut comp).unwrap();
     let clk = sim.clock_ref("clk");
-    sim.call(&mut comp, "set_clock", &[str("clk"), clk])
+    sim.call_with_refs(&mut comp, "set_clock", &[str("clk").into(), clk])
         .unwrap();
     (sim, comp)
 }
@@ -103,7 +103,7 @@ fn start_closes_the_registrations() {
     let clk = sim.clock_ref("clk2");
     sim.call(&mut comp, "start", &[]).unwrap();
     let error = sim
-        .call(&mut comp, "set_clock", &[str("clk2"), clk])
+        .call_with_refs(&mut comp, "set_clock", &[str("clk2").into(), clk])
         .unwrap_err();
     assert!(
         error
@@ -125,7 +125,7 @@ fn a_name_is_registered_once() {
     let (mut sim, mut comp) = setup(|sim| sim);
     let rst = sim.reset_ref("rst");
     let error = sim
-        .call(&mut comp, "set_reset", &[str("clk"), rst])
+        .call_with_refs(&mut comp, "set_reset", &[str("clk").into(), rst])
         .unwrap_err();
     assert!(
         error.to_string().contains("`clk` is already registered"),

@@ -1589,19 +1589,19 @@ Decided:
     [TODO](#todo)).
 
 - Runtime arguments (`veryl test --runtime-arg=..`, Veryl's plusargs;
-  see [veryl-proposals.md](veryl-proposals.md#arguments-into-a-simulation))
+  [veryl-lang/veryl#3717](https://github.com/veryl-lang/veryl/pull/3717))
   override the test module, as UVM's `+UVM_*` plusargs do `run_test` and
   the testbench's own settings:
 
   ```
-  veryl +local test -t regblock_test --runtime-arg=VERALD_TESTNAME:ReverseTest --runtime-arg=VERALD_LOG_LEVEL:debug
+  veryl +local test -t regblock_test --runtime-arg=VERALD_TESTNAME=ReverseTest --runtime-arg=VERALD_LOG_LEVEL=debug
   ```
 
   - The runtime takes a copy of them at `start`; they do not change during
     the run.
   - Its own are under the `VERALD_` prefix, in upper case as UVM's:
-    `VERALD_TESTNAME:<name>` names the test over the name given to `start`
-    (UVM's `+UVM_TESTNAME`), and any other `VERALD_<KEY>:<value>` is the option
+    `VERALD_TESTNAME=<name>` names the test over the name given to `start`
+    (UVM's `+UVM_TESTNAME`), and any other `VERALD_<KEY>=<value>` is the option
     `<key>` in lower case (`VERALD_TIMEOUT`, `VERALD_LOG_LEVEL`, a testbench's
     own), taken in the order given after the test module's, so the command
     line wins and the last of a name wins. An unknown key, or one given as

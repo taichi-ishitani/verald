@@ -17,14 +17,15 @@ pub fn setup<C: Component>(signals: &[(&str, u32)], block: &str) -> (MockSim, C)
     let mut comp = sim.build::<C>().unwrap();
     sim.init(&mut comp).unwrap();
     let clk = sim.clock_ref("clk");
-    sim.call(&mut comp, "set_clock", &[str("clk"), clk])
+    sim.call_with_refs(&mut comp, "set_clock", &[str("clk").into(), clk])
         .unwrap();
     let rst = sim.reset_ref("rst");
-    sim.call(&mut comp, "set_reset", &[str("rst"), rst])
+    sim.call_with_refs(&mut comp, "set_reset", &[str("rst").into(), rst])
         .unwrap();
     for (name, width) in signals {
         let sig = sim.signal_ref(name, false, &[*width]);
-        sim.call(&mut comp, "set_input", &[str(name), sig]).unwrap();
+        sim.call_with_refs(&mut comp, "set_input", &[str(name).into(), sig])
+            .unwrap();
     }
     sim.call(&mut comp, "bind_to_instance", &[str(""), str(block)])
         .unwrap();

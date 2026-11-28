@@ -126,10 +126,10 @@ fn setup(prefixes: &[&str]) -> (MockSim, Comp) {
     let mut comp = sim.build::<Comp>().unwrap();
     sim.init(&mut comp).unwrap();
     let clk = sim.clock_ref("clk");
-    sim.call(&mut comp, "set_clock", &[str("clk"), clk])
+    sim.call_with_refs(&mut comp, "set_clock", &[str("clk").into(), clk])
         .unwrap();
     let rst = sim.reset_ref("rst");
-    sim.call(&mut comp, "set_reset", &[str("rst"), rst])
+    sim.call_with_refs(&mut comp, "set_reset", &[str("rst").into(), rst])
         .unwrap();
     for prefix in prefixes {
         let at = |m: &str| {
@@ -141,16 +141,16 @@ fn setup(prefixes: &[&str]) -> (MockSim, Comp) {
         };
         for (name, width) in [("req", 1), ("ack", 1), ("data", 8)] {
             let sig = sim.signal_ref(&at(name), false, &[width]);
-            sim.call(&mut comp, "set_input", &[str(&at(name)), sig])
+            sim.call_with_refs(&mut comp, "set_input", &[str(&at(name)).into(), sig])
                 .unwrap();
         }
         if !prefix.is_empty() {
             // The instance's own clock and reset.
             let clk = sim.clock_ref(&at("clk"));
-            sim.call(&mut comp, "set_clock", &[str(&at("clk")), clk])
+            sim.call_with_refs(&mut comp, "set_clock", &[str(&at("clk")).into(), clk])
                 .unwrap();
             let rst = sim.reset_ref(&at("rst"));
-            sim.call(&mut comp, "set_reset", &[str(&at("rst")), rst])
+            sim.call_with_refs(&mut comp, "set_reset", &[str(&at("rst")).into(), rst])
                 .unwrap();
         }
     }
@@ -275,7 +275,7 @@ fn a_modport_member_is_read_through_its_field() {
             ("ready", RefDir::Input, &[1]),
         ],
     );
-    sim.call(&mut comp, "set_modport", &[str("bus"), bus])
+    sim.call_with_refs(&mut comp, "set_modport", &[str("bus").into(), bus])
         .unwrap();
     bind(&mut sim, &mut comp, "", "BusAssertions");
     sim.call(&mut comp, "start", &[]).unwrap();

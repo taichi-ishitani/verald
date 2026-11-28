@@ -282,9 +282,11 @@ fn setup() -> (MockSim, Tb) {
     let mut tb = sim.build::<Tb>().unwrap();
     sim.init(&mut tb).unwrap();
     let clk = sim.clock_ref("clk");
-    sim.call(&mut tb, "set_clock", &[str("clk"), clk]).unwrap();
+    sim.call_with_refs(&mut tb, "set_clock", &[str("clk").into(), clk])
+        .unwrap();
     let rst = sim.reset_ref("rst");
-    sim.call(&mut tb, "set_reset", &[str("rst"), rst]).unwrap();
+    sim.call_with_refs(&mut tb, "set_reset", &[str("rst").into(), rst])
+        .unwrap();
     let bus = sim.modport_ref(
         "bus",
         "adder_if",
@@ -296,16 +298,17 @@ fn setup() -> (MockSim, Tb) {
             ("result", RefDir::Input, &[9]),
         ],
     );
-    sim.call(&mut tb, "set_modport", &[str("bus"), bus])
+    sim.call_with_refs(&mut tb, "set_modport", &[str("bus").into(), bus])
         .unwrap();
     let irq = sim.signal_ref("interrupt", false, &[1]);
-    sim.call(&mut tb, "set_input", &[str("interrupt"), irq])
+    sim.call_with_refs(&mut tb, "set_input", &[str("interrupt").into(), irq])
         .unwrap();
     let wide = sim.signal_ref("wide", false, &[200]);
-    sim.call(&mut tb, "set_input", &[str("wide"), wide])
+    sim.call_with_refs(&mut tb, "set_input", &[str("wide").into(), wide])
         .unwrap();
     let ack = sim.signal_ref("ack", true, &[1]);
-    sim.call(&mut tb, "set_output", &[str("ack"), ack]).unwrap();
+    sim.call_with_refs(&mut tb, "set_output", &[str("ack").into(), ack])
+        .unwrap();
     (sim, tb)
 }
 

@@ -45,7 +45,7 @@
   directory of `Veryl.toml`). A missing default file is not an error:
   nothing is configured.
 - **Another file** is given by the test module (`tb.load_config(path)`) or
-  by the runtime argument `VERALD_CONFIG:<path>`, the runtime argument
+  by the runtime argument `VERALD_CONFIG=<path>`, the runtime argument
   winning. The file given replaces the default one; they are not merged.
   A file given and missing is an error.
 - **Paths are relative to the project's root.** The file is opened through
@@ -236,3 +236,16 @@ A run has one Verald component, holding the testbench, the assertions or
 both. Selecting settings by component would need the component's instance
 path from Veryl (`BuildCtx` has the seed derived from it, not the path),
 and nothing needs two components.
+
+### `connections` as registrations, for now
+
+With references by path from Veryl (see
+[Reserved parts](#reserved-parts-and-changes-to-veryl)), the testbench's
+code could ask for a design's signal or interface by its path directly,
+and assertions bind by name at an instance path; `connections` would then
+not be needed. For now, `connections` stays what it is: registrations made
+by the file, the ports and interfaces it names registered as the test
+module's `set_*` register them, and the testbench's connections and the
+assertions' binds made to those registered names (the user's decision,
+2026-11-28). A VIP needs only its interface instance's reference either
+way. Asking by path from the testbench's code is left for later.

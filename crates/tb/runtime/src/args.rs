@@ -58,7 +58,7 @@ pub fn format(args: &[RuntimeArg]) -> String {
     args.iter()
         .map(|arg| match &arg.value {
             ArgValue::Flag => arg.name.clone(),
-            ArgValue::Text(value) => format!("{}:{value}", arg.name),
+            ArgValue::Text(value) => format!("{}={value}", arg.name),
         })
         .collect::<Vec<_>>()
         .join(" ")

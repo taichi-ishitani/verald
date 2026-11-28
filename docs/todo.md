@@ -93,15 +93,16 @@ From [assertion-design.md](assertion-design.md#deferred-items).
 
 - `Verald.toml` ([config-design.md](config-design.md)): designed, not
   implemented.
+- The testbench's code asking for a design's signal or interface by its
+  path, in place of registered names, once Veryl gives references by path
+  ([`connections` as registrations](config-design.md#connections-as-registrations-for-now)).
 
 ## Veryl
 
-- Proposals to Veryl ([veryl-proposals.md](veryl-proposals.md)): runtime
-  arguments, clocking blocks as a language feature (a study), Rust types
-  generated from Veryl packages, a hook on reset release, `%m` as a format
-  specifier.
-- After veryl-lang/veryl#3767 is merged: the DPI host's `port_event`,
-  `MockSim`'s references in the tests, `host::fired` on `ctx.fired`.
-- Depend on Veryl's master instead of the fork's `tbf` branch (whose
-  changes are merged), now that the assertions are implemented.
+- Proposals to Veryl ([veryl-proposals.md](veryl-proposals.md)): clocking
+  blocks as a language feature (a study), Rust types generated from Veryl
+  packages (veryl-lang/veryl#3712), a hook on reset release, `%m` as a
+  format specifier (veryl-lang/veryl#3713).
+- After veryl-lang/veryl#3767 is merged: the DPI host's `port_event` and
+  port descriptions without the event port, `host::fired` on `ctx.fired`.
 - rustdv-veryl's open issues (#1 to #15), for what is brought over from it.

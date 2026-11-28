@@ -4,7 +4,7 @@
 #   make                  every test (`make -k` goes on past a failure)
 #   make ReverseTest      one test
 #   make SEED=5           with a seed
-#   make ARGS="--runtime-arg=ROUNDS:4 --runtime-arg=VERALD_LOG_LEVEL:debug"
+#   make ARGS="--runtime-arg=ROUNDS=4 --runtime-arg=VERALD_LOG_LEVEL=debug"
 #                         with more runtime arguments
 
 TESTS := BasicTest ReverseTest RandomTest DirectTest
@@ -15,7 +15,7 @@ VERYL ?= veryl +local
 all: $(TESTS)
 
 $(TESTS):
-	$(VERYL) test $(if $(SEED),--seed $(SEED)) --runtime-arg=VERALD_TESTNAME:$@ $(ARGS)
+	$(VERYL) test $(if $(SEED),--seed $(SEED)) --runtime-arg=VERALD_TESTNAME=$@ $(ARGS)
 
 clean:
 	$(VERYL) clean

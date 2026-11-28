@@ -499,8 +499,14 @@ fn add_port(
     (ports.len() - 1) as u32
 }
 
-fn desc(fields: [&str; 8]) -> String {
-    fields.join(&sys::VRL_PORT_DESC_SEP.to_string())
+/// A port's description, as `port_desc` gives it: the fields up to the
+/// modport's name, then for a clock or a reset the port its hook fires
+/// through (`fires`: itself here, each port hearing an event of its own).
+fn desc(fields: [&str; 8], fires: Option<usize>) -> String {
+    let fires = fires.map(|i| i.to_string()).unwrap_or_default();
+    let mut all: Vec<&str> = fields.to_vec();
+    all.push(&fires);
+    all.join(&sys::VRL_PORT_DESC_SEP.to_string())
 }
 
 /// `verald_init(label, table, seed, vector_width)`: loads the table, makes the
@@ -555,20 +561,23 @@ pub fn init(
                 let idx = match entry.kind {
                     Kind::Modport => {
                         let name = sys::member_port_name(&entry.path, &m.name);
-                        let d = desc([
-                            dirtext,
-                            &width,
-                            &width,
-                            "",
-                            &name,
-                            &m.name,
-                            &entry.interface,
-                            &entry.modport,
-                        ]);
+                        let d = desc(
+                            [
+                                dirtext,
+                                &width,
+                                &width,
+                                "",
+                                &name,
+                                &m.name,
+                                &entry.interface,
+                                &entry.modport,
+                            ],
+                            None,
+                        );
                         add_port(&mut ports, name, output, Role::Data, m.width, d)
                     }
                     Kind::Signal => {
-                        let d = desc([dirtext, &width, &width, "", &entry.path, "", "", ""]);
+                        let d = desc([dirtext, &width, &width, "", &entry.path, "", "", ""], None);
                         add_port(
                             &mut ports,
                             entry.path.clone(),
@@ -590,7 +599,10 @@ pub fn init(
         }
         let mut resets = HashMap::new();
         for r in &table.reset {
-            let d = desc(["reset", "1", "1", "", &r.path, "", "", ""]);
+            let d = desc(
+                ["reset", "1", "1", "", &r.path, "", "", ""],
+                Some(ports.len()),
+            );
             resets.insert(
                 r.key,
                 add_port(&mut ports, r.path.clone(), false, Role::Reset, 1, d),
@@ -598,7 +610,10 @@ pub fn init(
         }
         let mut clocks = HashMap::new();
         for c in &table.clock {
-            let d = desc(["clock", "1", "1", "", &c.path, "", "", ""]);
+            let d = desc(
+                ["clock", "1", "1", "", &c.path, "", "", ""],
+                Some(ports.len()),
+            );
             let idx = add_port(&mut ports, c.path.clone(), false, Role::Clock, 1, d);
             clocks.insert(c.key, (idx, c.reset));
         }

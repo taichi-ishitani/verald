@@ -306,7 +306,8 @@ fn run(test: &str, edges: usize) -> MockSim {
     let mut tb = sim.build::<Tb>().unwrap();
     sim.init(&mut tb).unwrap();
     let clk = sim.clock_ref("clk");
-    sim.call(&mut tb, "set_clock", &[str("clk"), clk]).unwrap();
+    sim.call_with_refs(&mut tb, "set_clock", &[str("clk").into(), clk])
+        .unwrap();
     sim.call(&mut tb, "start", &[str(test)]).unwrap();
     sim.set_fired_clock("clk");
     for _ in 0..edges {
@@ -402,7 +403,8 @@ fn an_unbound_handle_fails_the_start() {
     let mut tb = sim.build::<Tb>().unwrap();
     sim.init(&mut tb).unwrap();
     let clk = sim.clock_ref("clk");
-    sim.call(&mut tb, "set_clock", &[str("clk"), clk]).unwrap();
+    sim.call_with_refs(&mut tb, "set_clock", &[str("clk").into(), clk])
+        .unwrap();
     let error = sim.call(&mut tb, "start", &[str("Unbound")]).unwrap_err();
     assert!(
         error.to_string().contains("unbound handles: `vseqr.b`"),

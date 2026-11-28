@@ -34,5 +34,6 @@ verald-random-macros = { path = "crates/random/macros" }
 verald-tb-core = { path = "crates/tb/core" }
 verald-tb-macros = { path = "crates/tb/macros" }
 verald-tb-runtime = { path = "crates/tb/runtime" }
-# Method reference arguments are not released yet (veryl-lang/veryl#3701).
-veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
+# Method reference arguments are not released yet (merged in master,
+# veryl-lang/veryl#3701): the `veryl +local` build is of the same commit.
+veryl-component = { git = "https://github.com/veryl-lang/veryl", branch = "master" }

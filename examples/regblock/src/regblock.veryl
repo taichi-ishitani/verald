@@ -78,7 +78,7 @@ module regblock (
 /// options and the test's values are given at run time, as runtime
 /// arguments:
 ///
-///     veryl +local test --runtime-arg=VERALD_TESTNAME:ReverseTest --runtime-arg=ROUNDS:4
+///     veryl +local test --runtime-arg=VERALD_TESTNAME=ReverseTest --runtime-arg=ROUNDS=4
 ///
 /// `BasicTest` runs when none is named, for 2 rounds.
 #[test(regblock_test)]

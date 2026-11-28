@@ -250,7 +250,8 @@ fn setup() -> (MockSim, Tb) {
     let mut tb = sim.build::<Tb>().unwrap();
     sim.init(&mut tb).unwrap();
     let clk = sim.clock_ref("clk");
-    sim.call(&mut tb, "set_clock", &[str("clk"), clk]).unwrap();
+    sim.call_with_refs(&mut tb, "set_clock", &[str("clk").into(), clk])
+        .unwrap();
     (sim, tb)
 }
 

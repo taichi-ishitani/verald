@@ -626,7 +626,7 @@ module fifo_test {
   DUT's ports: enough for assertions on a DUT's inputs and outputs.
 - It relies on references passed to component methods
   ([veryl-lang/veryl#3701](https://github.com/veryl-lang/veryl/pull/3701)),
-  so it runs on the `tbf` branch with `veryl +local`.
+  so it runs on Veryl's master with `veryl +local`.
 - Blocks are bound when the component starts, once the registrations and
   the configuration are complete. `export!` lists the blocks a component
   has; where they bind is not in it.

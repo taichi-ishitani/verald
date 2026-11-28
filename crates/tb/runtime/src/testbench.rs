@@ -20,7 +20,7 @@
 //!
 //! Runtime arguments (`veryl test --runtime-arg=..`) under the `VERALD_`
 //! prefix override the test module, as UVM's `+UVM_` plusargs:
-//! `VERALD_TESTNAME:<name>` the test given to `start`, and `VERALD_<KEY>:<value>`
+//! `VERALD_TESTNAME=<name>` the test given to `start`, and `VERALD_<KEY>=<value>`
 //! the option `<key>` (in lower case), applied at `start` after the test
 //! module's.
 
@@ -47,7 +47,7 @@ type HookResult = veryl_component::Result<()>;
 /// runtime alone may too.
 pub trait Testbench: 'static {
     /// Takes an option the runtime does not know (`tb.option(key, value)`,
-    /// or the runtime argument `VERALD_<KEY>:<value>`). Returns `Ok(false)` for
+    /// or the runtime argument `VERALD_<KEY>=<value>`). Returns `Ok(false)` for
     /// a key it does not know either. `testname` is not an option: its
     /// runtime argument names the test.
     fn option(_key: &str, _value: &Value) -> Result<bool, TestError> {

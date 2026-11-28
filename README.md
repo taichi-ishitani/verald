@@ -19,9 +19,7 @@ emerald is a variety of beryl.
 > Veryl: [veryl-lang/veryl#3701](https://github.com/veryl-lang/veryl/pull/3701)
 > (signal and modport references passed to component methods) and
 > [veryl-lang/veryl#3717](https://github.com/veryl-lang/veryl/pull/3717)
-> (runtime arguments), merged together in the `tbf` branch of
-> [taichi-ishitani/veryl](https://github.com/taichi-ishitani/veryl/tree/tbf),
-> run as `veryl +local`.
+> (runtime arguments), merged in Veryl's master, run as `veryl +local`.
 
 ## Testbench
 
@@ -180,11 +178,12 @@ and `examples/regblock`.
 
 ## Getting started
 
-1. Build Veryl from the `tbf` branch of taichi-ishitani/veryl and install
-   it as `local` (`verylup install local` in the Veryl repository).
+1. Build Veryl from the master of veryl-lang/veryl and install it as
+   `local` (`verylup install local` in the Veryl repository).
 2. Add a Rust crate for the components to the Veryl project, a `cdylib`
    depending on `verald` and on `veryl-component` (the derives name it),
-   from the same revision of Veryl:
+   from the same revision of Veryl (the component's ABI follows Veryl's,
+   so the `veryl +local` build and the crate's lock name one commit):
 
    ```toml
    [lib]
@@ -192,7 +191,7 @@ and `examples/regblock`.
 
    [dependencies]
    verald = { git = "https://github.com/taichi-ishitani/verald" }
-   veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
+   veryl-component = { git = "https://github.com/veryl-lang/veryl", branch = "master" }
    ```
 
    `verald`'s features choose the parts: `tb` and `random` by default.
@@ -211,9 +210,9 @@ and `examples/regblock`.
    options (`tb.option`) and settings (`tb.set`), and start a test by its
    registered name (`tb.start`).
 6. Run `veryl +local test`. Runtime arguments override the test module:
-   `--runtime-arg=VERALD_TESTNAME:<test>` starts another test, and
+   `--runtime-arg=VERALD_TESTNAME=<test>` starts another test, and
    `--runtime-arg=VERALD_<OPTION>:<value>` sets an option
-   (`VERALD_LOG_LEVEL:debug`); a test reads its own with `runtime_arg_value`.
+   (`VERALD_LOG_LEVEL=debug`); a test reads its own with `runtime_arg_value`.
 
 ## Examples
 

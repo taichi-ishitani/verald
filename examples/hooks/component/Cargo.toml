@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 verald-tb-runtime = { path = "../../../crates/tb/runtime" }
 # The component derives refer to `::veryl_component`; the same revision as
 # the runtime's.
-veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
+veryl-component = { git = "https://github.com/veryl-lang/veryl", branch = "master" }
 
 # Standalone package.
 [workspace]

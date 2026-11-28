@@ -23,7 +23,7 @@ examples/regblock/
 
 Run it with `veryl +local test` in `examples/regblock`; the test and the
 options are given as runtime arguments
-(`--runtime-arg=VERALD_TESTNAME:ReverseTest`, see section 2). `make` there
+(`--runtime-arg=VERALD_TESTNAME=ReverseTest`, see section 2). `make` there
 runs every test, one after another (`make ReverseTest` one, `make SEED=5`
 with a seed, `make ARGS=..` with more arguments).
 
@@ -114,7 +114,7 @@ framework's options, are given when it runs, as runtime arguments, as
 UVM's `+UVM_*` plusargs:
 
 ```text
-veryl +local test --runtime-arg=VERALD_TESTNAME:ReverseTest --runtime-arg=VERALD_TIMEOUT:100000
+veryl +local test --runtime-arg=VERALD_TESTNAME=ReverseTest --runtime-arg=VERALD_TIMEOUT=100000
 ```
 
 - `VERALD_TESTNAME` names the test over the one given to `start`: the
@@ -125,7 +125,7 @@ veryl +local test --runtime-arg=VERALD_TESTNAME:ReverseTest --runtime-arg=VERALD
   default), `VERALD_MAX_ERRORS`. A test module may also give options with
   `tb.option(key, value)`; a runtime argument overrides it.
 - A misspelt one (`VERALD_LOG_LEVL`) fails the test, listing the options.
-- Arguments without the prefix are the tests' own: `ROUNDS:4` sets how
+- Arguments without the prefix are the tests' own: `ROUNDS=4` sets how
   many times `BasicTest` writes and reads every register (2 by default;
   see [section 7](#7-the-base-test)).
 
@@ -151,7 +151,7 @@ crate-type = ["cdylib"]
 regblock_assertions = { path = "../assertions" }
 regblock_vip = { path = "../vip" }
 verald = { path = "../../../crates/verald" }
-veryl-component = { git = "https://github.com/taichi-ishitani/veryl", branch = "tbf" }
+veryl-component = { git = "https://github.com/veryl-lang/veryl", branch = "master" }
 ```
 
 `src/lib.rs` imports the VIP and the prelude, and at its end registers
@@ -665,7 +665,7 @@ impl Component for RegTest {
     type Context = RegTestConfig;
 
     fn setup(_setup_context: &mut SetupContext) -> Result<RegTestConfig, TestError> {
-        Ok(RegTestConfig { rounds: runtime_arg_value("ROUNDS")?.unwrap_or(2) })   // --runtime-arg=ROUNDS:4
+        Ok(RegTestConfig { rounds: runtime_arg_value("ROUNDS")?.unwrap_or(2) })   // --runtime-arg=ROUNDS=4
     }
 
     fn build(scope: &Scope, config: RegTestConfig) -> Result<Self, TestError> {
@@ -710,7 +710,7 @@ impl Component for RegTest {
   kept typed. A sequence started on a handle left unconnected stops the
   test with a message naming the sequence.
 - `runtime_arg_value("ROUNDS")` reads the runtime argument as the field's
-  type, `None` if it was not given; a value that does not convert (`ROUNDS:x`,
+  type, `None` if it was not given; a value that does not convert (`ROUNDS=x`,
   or one beyond `u16`) fails the start, naming the argument. A test module
   could pass the value instead (`tb.set("rounds", 2)`, read with
   `setup_context.get("rounds")?`); this one leaves all to run time.
@@ -894,7 +894,7 @@ time.
   count of messages of each severity, including those not printed.
 - The summary also lists the runtime arguments given, when there are
   some, so a log shows how its run was made.
-- With `--runtime-arg=VERALD_LOG_LEVEL:debug`, the hierarchy is printed when
+- With `--runtime-arg=VERALD_LOG_LEVEL=debug`, the hierarchy is printed when
   the test starts:
 
   ```text

@@ -214,8 +214,12 @@ fn run(test: &str) -> Vec<String> {
     let mut tb = sim.build::<Tb>().unwrap();
     sim.init(&mut tb).unwrap();
     let clk = sim.clock_ref("clk");
-    sim.call(&mut tb, "set_clock", &[Value::Str("clk".into()), clk])
-        .unwrap();
+    sim.call_with_refs(
+        &mut tb,
+        "set_clock",
+        &[Value::Str("clk".into()).into(), clk],
+    )
+    .unwrap();
     sim.call(&mut tb, "start", &[Value::Str(test.into())])
         .unwrap();
     sim.set_fired_clock("clk");

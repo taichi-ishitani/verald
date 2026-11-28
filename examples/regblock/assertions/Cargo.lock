@@ -355,7 +355,7 @@ dependencies = [
 [[package]]
 name = "veryl-component"
 version = "0.1.2"
-source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#37f252fbca5f592eead47bfdc8459bd73069ac55"
+source = "git+https://github.com/veryl-lang/veryl?branch=master#4d67bdf383d2c8fa3045166dc00acf451b66b7f3"
 dependencies = [
  "anyhow",
  "num-bigint",
@@ -367,7 +367,7 @@ dependencies = [
 [[package]]
 name = "veryl-component-macros"
 version = "0.1.2"
-source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#37f252fbca5f592eead47bfdc8459bd73069ac55"
+source = "git+https://github.com/veryl-lang/veryl?branch=master#4d67bdf383d2c8fa3045166dc00acf451b66b7f3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -377,7 +377,7 @@ dependencies = [
 [[package]]
 name = "veryl-component-sys"
 version = "0.1.2"
-source = "git+https://github.com/taichi-ishitani/veryl?branch=tbf#37f252fbca5f592eead47bfdc8459bd73069ac55"
+source = "git+https://github.com/veryl-lang/veryl?branch=master#4d67bdf383d2c8fa3045166dc00acf451b66b7f3"
 
 [[package]]
 name = "winnow"

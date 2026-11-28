@@ -217,9 +217,11 @@ fn setup_with(args: impl FnOnce(MockSim) -> MockSim) -> (MockSim, Tb) {
     let mut tb = sim.build::<Tb>().unwrap();
     sim.init(&mut tb).unwrap();
     let clk = sim.clock_ref("clk");
-    sim.call(&mut tb, "set_clock", &[str("clk"), clk]).unwrap();
+    sim.call_with_refs(&mut tb, "set_clock", &[str("clk").into(), clk])
+        .unwrap();
     let rst = sim.reset_ref("rst");
-    sim.call(&mut tb, "set_reset", &[str("rst"), rst]).unwrap();
+    sim.call_with_refs(&mut tb, "set_reset", &[str("rst").into(), rst])
+        .unwrap();
     (sim, tb)
 }
 
@@ -285,7 +287,7 @@ fn a_timeout_is_fatal_and_lists_the_tasks_alive() {
 fn the_timeout_counts_the_master_clock() {
     let (mut sim, mut tb) = setup();
     let fast = sim.clock_ref("fast");
-    sim.call(&mut tb, "set_clock", &[str("fast"), fast])
+    sim.call_with_refs(&mut tb, "set_clock", &[str("fast").into(), fast])
         .unwrap();
     let error = sim
         .call(&mut tb, "set_master_clock", &[str("slow")])
